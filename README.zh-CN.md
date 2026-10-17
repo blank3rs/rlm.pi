@@ -61,8 +61,9 @@ V(ΔΣ_t, Σ_t)                 确定性验证器——没有崩溃路径
 | 模型 | OOLONG | 平均 token/题 | 成本/题 |
 |---|---|---|---|
 | `zai/glm-4.7` | **91.7%** (22/24) | ~36k | ~$0.00 \* |
-| `openrouter/qwen/qwen3.8-27b` | 49% | ~36k | $0.10 |
-| `openrouter/inception/mercury-2.5` | 38% | ~36k | $0.005 |
+| `zai/glm-4.5-flash` | **58.3%** (14/24) | **~16k** | ~$0.00 \* |
+| `openrouter/qwen/qwen3.8-27b` | 49% | ~73k | $0.10 |
+| `openrouter/inception/mercury-2.5` | 38% | ~77k | $0.005 |
 
 \* Z.ai coding-plan 端点——订阅计费，所以 `costUsd` 保持 $0。
 

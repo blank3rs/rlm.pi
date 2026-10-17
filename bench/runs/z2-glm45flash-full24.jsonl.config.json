@@ -1,0 +1,20 @@
+{
+  "gitRev": "529e1a2",
+  "startedAt": "2026-10-17T20:26:53.701Z",
+  "model": "zai/glm-4.5-flash",
+  "subModel": null,
+  "suite": "oolong",
+  "limit": null,
+  "taskIds": null,
+  "oolongMaxCl": 65536,
+  "oolongLimit": 24,
+  "oolongLabels": false,
+  "runs": 1,
+  "maxIterations": 12,
+  "temperature": 0,
+  "skillState": true,
+  "pricing": {
+    "inputPerToken": 0,
+    "outputPerToken": 0
+  }
+}
