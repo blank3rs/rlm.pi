@@ -31,6 +31,7 @@ const RETRYABLE_STATUS = new Set([408, 429, 500, 502, 503, 504]);
 
 /** Did this failure mean "too many requests"? Drives the cooldown penalty. */
 export function isRateLimited(status: number | undefined, text: string): boolean {
+  if (NON_RETRYABLE_TEXT.test(text)) return false;
   return status === 429 || (status === undefined && RATE_LIMIT_TEXT.test(text));
 }
 
@@ -48,11 +49,11 @@ export function isProviderStop(text: string): boolean {
 
 /** Should this failure get another attempt? Explicit non-retryables win over patterns. */
 export function retryableError(status: number | undefined, text: string): boolean {
+  if (NON_RETRYABLE_TEXT.test(text)) return false;
   if (status !== undefined) {
     if (NON_RETRYABLE_STATUS.has(status)) return false;
     if (RETRYABLE_STATUS.has(status)) return true;
   }
-  if (NON_RETRYABLE_TEXT.test(text)) return false;
   return RETRYABLE_TEXT.test(text);
 }
 

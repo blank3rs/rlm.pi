@@ -291,4 +291,68 @@ const BIG = "y".repeat(4_000);
   check("R5: keepTurns=0 stubs the prose", JSON.stringify(strict0[1]).includes("turn elided"));
 }
 
+// ── Prefix-cache restoration: archive exclusion + elideStep epoch quantization + preserveModelAuthored ──
+import { formatContextListing, workspacePathSignature } from "../src/context/listing.ts";
+{
+  const wsOnly = [
+    { path: "src/a.ts", content: "const a = 1;", tokens: 4 },
+    { path: "src/b.ts", content: "const b = 2;", tokens: 4 },
+  ];
+  const withArchive = [
+    ...wsOnly,
+    { path: "ctx/session-log/turn-1-2.md", content: "archived turn body", tokens: 50 },
+  ];
+  check(
+    "listing: workspacePathSignature ignores ctx/session-log/* segments",
+    workspacePathSignature(wsOnly) === workspacePathSignature(withArchive),
+  );
+  check(
+    "listing: formatContextListing excludes ctx/session-log/* from file count and body",
+    formatContextListing(wsOnly) === formatContextListing(withArchive) &&
+      !formatContextListing(withArchive).includes("ctx/session-log/"),
+  );
+
+  // elideStep=2: adding one more assistant turn inside the same 2-turn epoch (rawStale 2 → 3, both tailIdx=2)
+  // keeps the prefix identical so the provider's KV prefix cache hits on intra-epoch turns.
+  const turn4: RootMessage[] = [
+    user("u0"),
+    assistant(`a0 ${BIG}`),
+    toolResult("read", `t0 ${BIG}`),
+    assistant(`a1 ${BIG}`),
+    toolResult("read", `t1 ${BIG}`),
+    assistant(`a2 ${BIG}`),
+    toolResult("read", `t2 ${BIG}`),
+    assistant(`a3 ${BIG}`),
+    toolResult("read", `t3 ${BIG}`),
+  ];
+  const turn5: RootMessage[] = [
+    ...structuredClone(turn4),
+    assistant(`a4 ${BIG}`),
+    toolResult("read", `t4 ${BIG}`),
+  ];
+  elideStalePayloads(turn4, { keepTurns: 2, elideChars: 1_500, elideStep: 2 });
+  elideStalePayloads(turn5, { keepTurns: 2, elideChars: 1_500, elideStep: 2 });
+  check(
+    "elideStep=2: prefix messages [0..8] stay byte-identical across intra-epoch turns (KV cache hit)",
+    JSON.stringify(turn4.slice(0, 9)) === JSON.stringify(turn5.slice(0, 9)),
+  );
+
+  // preserveModelAuthored: once a fence sets nextStep, follow-up user prompts do not clobber it
+  const t = RootStateTracker.fresh("roadmap task");
+  t.setNextStep("```rust\nfn main() {}\n```\ntranslate this report", { preserveModelAuthored: true });
+  check(
+    "setNextStep: strips fenced code blocks when seeding from user prompt",
+    t.snapshot().nextStep === "translate this report",
+    t.snapshot().nextStep,
+  );
+  t.applyFences([{ ok: true, value: { state_patch: { nextStep: "implement shared-vault member log" } } }]);
+  check("fence authors nextStep", t.snapshot().nextStep === "implement shared-vault member log");
+  t.setNextStep("```The share-key report blob...\nпереведи", { preserveModelAuthored: true });
+  check(
+    "setNextStep: preserveModelAuthored keeps fence-authored nextStep intact",
+    t.snapshot().nextStep === "implement shared-vault member log",
+    t.snapshot().nextStep,
+  );
+}
+
 finish();

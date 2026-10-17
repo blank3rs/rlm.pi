@@ -438,4 +438,103 @@ import { errorMessage } from "../src/util/errors.ts";
     c3.listClaims().slice(0, 60));
 }
 
+// ── Concurrent sibling runs at depth=1 + target-aware near-dup + demoted file slice + resetTurnBudget ──
+{
+  const led = new TaskLedger();
+  // Concurrent sibling child engines at depth=1 (as spawned by rlm_batch)
+  const idA = led.beginRun(
+    "Analyze crates/hf_app in detail: public types, functions, invariants, and architecture",
+    1,
+  );
+  const idB = led.beginRun(
+    "Analyze crates/hf_body in detail: public types, functions, invariants, and architecture",
+    1,
+  );
+  // A depth=1 claim with similar wording for a third crate must NOT be flagged as an ancestor echo
+  // of its depth=1 siblings (siblings have anc.depth === req.depth, not anc.depth < req.depth).
+  const reqC = {
+    kind: "rlm" as const,
+    prompt: "Analyze crates/hf_core in detail: public types, functions, invariants, and architecture",
+    paths: [],
+    depth: 1,
+  };
+  const dC = led.tryClaim(reqC, taskKey("rlm", reqC.prompt, [], "m", ""));
+  check("concurrent siblings: depth=1 sibling is never treated as an ancestor echo", dC.type === "run", JSON.stringify(dC));
+
+  // A templated claim for crates/hf_body must NOT near-dup coalesce onto crates/hf_core even though
+  // 10/11 words are identical (targetTokenSet distinguishes crates/hf_body vs crates/hf_core).
+  const reqBody = {
+    kind: "rlm" as const,
+    prompt: "Analyze crates/hf_body in detail: public types, functions, invariants, and architecture",
+    paths: [],
+    depth: 1,
+  };
+  const dBody = led.tryClaim(reqBody, taskKey("rlm", reqBody.prompt, [], "m", ""));
+  check("targetTokenSet: templated crate prompts with distinct target paths do NOT coalesce", dBody.type === "run", JSON.stringify(dBody));
+
+  // Out-of-order endRun(idA) removes idA without popping idB
+  led.endRun(idA);
+  // A depth=2 grandchild echoing idB's root prompt is still caught as an ancestor echo
+  const grandChildEcho = led.tryClaim(
+    {
+      kind: "rlm",
+      prompt: "Analyze crates/hf_body in detail: public types, functions, invariants, and architecture",
+      paths: [],
+      depth: 2,
+    },
+    taskKey("rlm", "grandchild-echo", [], "m", ""),
+  );
+  check("endRun(id): out-of-order endRun preserves sibling ancestor slot for depth=2", grandChildEcho.type === "echo", JSON.stringify(grandChildEcho));
+  led.endRun(idB);
+
+  // resetTurnBudget resets rlmCount while preserving done claims
+  if (dC.type === "run") led.finish(dC.key, "hf_core summary");
+  check("before resetTurnBudget: rlmCount > 0", led.rlmCount() > 0);
+  led.resetTurnBudget();
+  check("after resetTurnBudget: rlmCount === 0", led.rlmCount() === 0);
+  const replayC = led.tryClaim(reqC, taskKey("rlm", reqC.prompt, [], "m", ""));
+  check("after resetTurnBudget: finished claims still coalesce", replayC.type === "coalesce" && replayC.done);
+}
+
+// ── Demoted rlm_query attaches matched file slices from getChildContext ──
+{
+  const ledger = new TaskLedger();
+  // Exhaust rlmBudget=1
+  ledger.tryClaim({ kind: "rlm", prompt: "exhaust budget", paths: [], depth: 1 }, "exhaust-key");
+  let seenLeafPrompt = "";
+  const inv: Invocation = {
+    emitter: new RlmEmitter(),
+    parentId: undefined,
+    depth: 0,
+    limits: { remainingTimeoutMs: () => undefined, addUsage: () => {}, addRaw: () => {} },
+  };
+  const deps: SubcallHandlerDeps = {
+    resolve: () => inv,
+    gates: createSubcallGates(4, 2),
+    registry: MOCK_REGISTRY,
+    getLlmModel: () => MOCK_MODEL,
+    getConfig: () => ({ maxPromptChars: 100_000, maxDepth: 4, enableLedger: true, rlmBudget: 1, requestTimeoutMs: 900_000 }),
+    getModel: () => MOCK_MODEL,
+    getChildContext: () => [
+      { path: "crates/hf_app/src/lib.rs", content: "pub struct AppEngine { pub version: u32 }" },
+      { path: "crates/hf_body/src/lib.rs", content: "pub struct RigidBody { pub mass: f32 }" },
+    ],
+    groundLeaf: (p): string => {
+      seenLeafPrompt = p;
+      return p;
+    },
+    runChild: async (): Promise<RlmResult> => {
+      throw new Error("must be demoted");
+    },
+    ledger,
+  };
+  const handlers = createSubcallHandlers(deps);
+  const spawned = await handlers.rlmQuery("Study crates/hf_app and list public structs", 0, { detached: false });
+  check("demoted with context: kind is llm", spawned.kind === "llm");
+  await handlers.awaitTask(spawned.task_id ?? "", undefined, undefined, 0, { detached: false });
+  check("demoted with context: leaf prompt received matched file content",
+    seenLeafPrompt.includes("pub struct AppEngine") && !seenLeafPrompt.includes("pub struct RigidBody"),
+    seenLeafPrompt.slice(0, 120));
+}
+
 finish();

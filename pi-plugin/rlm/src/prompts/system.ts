@@ -65,7 +65,7 @@ function orchestratorAddendum(maxPromptChars: number, delegation: boolean): stri
     "",
     `Sub-call budget: (1) per-prompt < ${maxPromptChars.toLocaleString()} chars (≈${promptCapTokensK(maxPromptChars)}K tok);`,
     "(2) ~20 prompts per llm_batch. Fat prompts in small batches beat thousands of tiny prompts.",
-    "Filter in Python first when both axes overflow.",
+    "Filter in Python first when both axes overflow; for semantic classification/counting over unstructured items, classify chunks with `llm_batch` and aggregate exact counts in Python.",
     "",
     "Reserve your tokens for planning, combining, and finalizing. Do not finalize before inspecting `context`.",
   ].join("\n");

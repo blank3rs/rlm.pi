@@ -168,6 +168,8 @@ interface ReplToolDeps {
    * markLoaded("") / markSeededCwd(abs) — without this, add_context(".") doubles the tree.
    */
   readonly registerContextBundle?: (bundle: AddContextHandlerBundle) => void;
+  /** Register a per-prompt budget reset hook so `rlmBudget` applies per user turn, not session-lifetime. */
+  readonly registerLedgerReset?: (reset: () => void) => void;
 }
 
 export function createReplTool(deps: ReplToolDeps): ToolDefinition<typeof ReplToolParams, ReplDetails> {
@@ -178,6 +180,7 @@ export function createReplTool(deps: ReplToolDeps): ToolDefinition<typeof ReplTo
   // v5: one session-wide blackboard for the native repl() path — the same claim/coalesce/
   // demote logic the engine gets per run, shared by every turn and every child it spawns.
   const sessionLedger = new TaskLedger();
+  deps.registerLedgerReset?.(() => { sessionLedger.resetTurnBudget(); });
 
   // Late-bound cwd — getOrCreate installs handlers only at spawn; never rebuild the closure.
   let sessionCwd = process.cwd();

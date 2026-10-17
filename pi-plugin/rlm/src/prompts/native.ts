@@ -22,7 +22,7 @@ function nativeReplGlossary(): string {
   return [
     "## REPL surface (inside `repl({code})` only)",
     "",
-    "Persistent Python sandbox. `print(...)` returns, and so does a trailing bare expression (it is echoed). variables/`answers`/`plan` persist across repl calls.",
+    "Persistent Python sandbox (`context`: `list[dict]` with `path`, `content`, `tokens`). `print(...)` and trailing bare expressions return; variables/`answers`/`plan` persist across repl calls.",
     CTX_VIRTUAL_PATH_NOTE,
     "",
     "### Free locate (no sub-LLM tokens)",
@@ -42,7 +42,7 @@ function nativeReplGlossary(): string {
     "| `rlm_batch(tasks|prompts, paths=None)` | list[str] | **≥2 independent studies in parallel** | trivia / one-shots |",
     "",
     "Collect: `await_task(t)` / `await_task([…])` / `await_task()` (all running). `list_tasks()` finds lost handles. `task.done` when settled.",
-    "If a spawn call raises, the assignment did NOT run — the variable is undefined in later cells. Re-spawn with the corrected signature from the error message.",
+    "If a spawn call raises, the assignment did NOT run — the variable is undefined; re-spawn with the corrected signature.",
     "The child inherits your `context`; send instructions + optional `paths=['src/auth/']` prefixes — never paste file bodies. **Children are sandboxed — they cannot mutate your `answers`, `plan`, or REPL variables.**",
     CHUNKED_GLOSSARY_LINE_NATIVE,
     "- `llm_map_reduce(...)` **blocks** (map then reduce) — prefer Tasks when you can interleave free work.",

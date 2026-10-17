@@ -161,7 +161,9 @@ export function createEngine(deps: EngineDeps): RunRlm {
     // v5 TaskLedger: one blackboard per root run; children inherit the same instance via
     // childRun (RlmInput.ledger — the one construction seam, DRY #6).
     const runLedger = input.ledger ?? new TaskLedger();
-    if (deps.config.enableLedger) runLedger.beginRun(input.rootPrompt);
+    const ledgerRunId = deps.config.enableLedger
+      ? runLedger.beginRun(input.rootPrompt, input.depth)
+      : undefined;
     // ── Workstream A: Σ_t — the structured execution state (paper §3). Degraded ⇒ the run
     // behaves exactly as built. History-as-deliverable runs (narrative) keep their archive
     // as the product — RunState never activates there (§12.1).
@@ -656,9 +658,9 @@ export function createEngine(deps: EngineDeps): RunRlm {
       nodeStatus = "error";
       throw err;
     } finally {
-      // Workstream B Hook 1: Σ → SkillState notes at run end (all return paths; never throws).
-      if (skillStore !== undefined && deps.config.enableSkillState) await harvestSkillNotes();
-      if (deps.config.enableLedger) runLedger.endRun();
+      // Workstream B Hook 1: Σ → onRunState mirror + SkillState notes at run end (all return paths; never throws).
+      await harvestSkillNotes();
+      if (ledgerRunId !== undefined) runLedger.endRun(ledgerRunId);
       if (selfReportId) {
         emitter.emitSubcallUpdated({
           id: selfReportId,

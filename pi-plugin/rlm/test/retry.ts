@@ -52,6 +52,11 @@ async function main(): Promise<void> {
   check("isRateLimited: 429 status", isRateLimited(429, "x"));
   check("isRateLimited: zai 1302 text", isRateLimited(undefined, "您的账户已达到速率限制 (1302)"));
   check("isRateLimited: 500 is not rate-limit", !isRateLimited(500, "internal error"));
+  check(
+    "429 status with ZAI 1113 Insufficient balance is NOT retryable or rate-limited",
+    !retryableError(429, '429: {"code":"1113","message":"Insufficient balance or no resource package."}') &&
+      !isRateLimited(429, '429: {"code":"1113","message":"Insufficient balance or no resource package."}'),
+  );
 
   // ── retry-after parsing ──
   check("retry-after-ms header", retryAfterMs({ "retry-after-ms": "1200" }) === 1200);

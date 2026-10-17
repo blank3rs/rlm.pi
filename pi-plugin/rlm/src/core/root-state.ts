@@ -68,6 +68,9 @@ export class RootStateTracker {
   /** Set when a fence was rejected and not yet followed by an accepted delta.
    *  Fence-free turns count as idle only while this is set — an absent fence is free. */
   private fenceOutstanding = false;
+  /** Set when a model fence authors `nextStep`, so follow-up user prompts ("translate",
+   *  pasted logs/reports) do not clobber the model's roadmap pointer on every turn. */
+  private modelAuthoredNextStep = false;
   private readonly failures = new Map<string, number>();
   private pendingObservation: string | undefined;
   private readonly retryMax: number;
@@ -180,9 +183,18 @@ export class RootStateTracker {
     }
   }
 
-  /** The user's latest ask IS the next step by definition (WS-4 v1 source). Empty is a no-op. */
-  setNextStep(text: string): void {
-    const trimmed = text.trim();
+  /** The user's latest ask IS the next step by definition (WS-4 v1 source). Empty is a no-op.
+   *  When `preserveModelAuthored` is set (before_agent_start), a model-authored `nextStep`
+   *  is never clobbered by raw user messages, and fenced markdown blobs are stripped so
+   *  pasting a report + "translate" does not pollute Σ.nextStep. */
+  setNextStep(text: string, opts?: { readonly preserveModelAuthored?: boolean }): void {
+    if (opts?.preserveModelAuthored === true && this.modelAuthoredNextStep && this.draft.nextStep !== "") {
+      return;
+    }
+    const raw = opts?.preserveModelAuthored === true
+      ? text.replace(/`{3,}[\s\S]*?`{3,}/g, " ").replace(/^`{3,}\S*/gm, " ").replace(/\s+/g, " ")
+      : text;
+    const trimmed = raw.trim();
     if (trimmed === "") return;
     this.draft.nextStep = trimmed.slice(0, 300);
     this.touch();
@@ -250,6 +262,7 @@ export class RootStateTracker {
       this.degradeIfIdle();
       return { fences: 0, accepted: 0, problems: 0 };
     }
+    const prevNextStep = this.draft.nextStep;
     let state = this.snapshot();
     const problems: string[] = [];
     let accepted = 0;
@@ -265,6 +278,9 @@ export class RootStateTracker {
       } else {
         problems.push(patchErrorText(next.error));
       }
+    }
+    if (state.nextStep !== prevNextStep) {
+      this.modelAuthoredNextStep = state.nextStep !== "";
     }
     // Accepted deltas reset the idle streak and clear the outstanding rejection — even
     // in a partially-failing batch (engine parity: real work is never punished for a

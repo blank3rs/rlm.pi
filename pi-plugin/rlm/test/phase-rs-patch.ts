@@ -290,4 +290,92 @@ function base() {
   check("normal patch under byte cap applies", under.ok);
 }
 
+// ── Tolerant patch validator: coalesced approach subkeys, synonyms, shorthand, artifacts[+], multi-index deletes ──
+{
+  // 1. Coalesced multi-key testedApproaches.<id>.<leaf> in a single patch
+  const coalesced = applyPatch(
+    base(),
+    {
+      state_patch: {
+        "testedApproaches.h2.status": "succeeded",
+        "testedApproaches.h2.evidence": "all 42 tests green",
+      },
+    },
+    10,
+  );
+  check(
+    "coalesced testedApproaches.<id>.status + .evidence applies cleanly",
+    coalesced.ok &&
+      coalesced.value.testedApproaches.h2?.status === "succeeded" &&
+      coalesced.value.testedApproaches.h2.evidence === "all 42 tests green",
+  );
+
+  // 2. Status synonyms (success/fail/in_progress) + string shorthand + fresh detail key remap
+  const synonyms = applyPatch(
+    base(),
+    {
+      state_patch: {
+        "testedApproaches.a1": { status: "success", note: "remapped to evidence" },
+        "testedApproaches.a2": { status: "fail", note: "remapped to reason" },
+        "testedApproaches.a3": { status: "in_progress", evidence: "remapped to note" },
+        "testedApproaches.a4": "succeeded — shorthand string outcome",
+      },
+    },
+    11,
+  );
+  check(
+    "status synonyms + detail key remap + string shorthand apply cleanly",
+    synonyms.ok &&
+      synonyms.value.testedApproaches.a1?.status === "succeeded" &&
+      synonyms.value.testedApproaches.a1.evidence === "remapped to evidence" &&
+      synonyms.value.testedApproaches.a2?.status === "failed" &&
+      synonyms.value.testedApproaches.a2.reason === "remapped to reason" &&
+      synonyms.value.testedApproaches.a3?.status === "partial" &&
+      synonyms.value.testedApproaches.a3.note === "remapped to note" &&
+      synonyms.value.testedApproaches.a4?.status === "succeeded" &&
+      synonyms.value.testedApproaches.a4.evidence === "shorthand string outcome",
+  );
+
+  // 3. artifacts[+] and multi-segment artifacts.<a>.<b>
+  const art = applyPatch(
+    base(),
+    {
+      state_patch: {
+        "artifacts[+]": ["src/new.ts — created module", { "src/other.ts": "helper" }],
+        "artifacts.crates/hf_app.status": "audited",
+      },
+    },
+    12,
+  );
+  check(
+    "artifacts[+] and multi-segment artifacts.<k>.<subk> apply cleanly",
+    art.ok &&
+      art.value.artifacts["src/new.ts"] === "created module" &&
+      art.value.artifacts["src/other.ts"] === "helper" &&
+      art.value.artifacts["crates/hf_app.status"] === "audited",
+  );
+
+  // 4. Multi-index array null deletions in one patch (descending order prevents index shift)
+  const seeded = applyPatch(
+    base(),
+    { state_patch: { "openQuestions[+]": ["q0", "q1", "q2"] } },
+    13,
+  );
+  check("seeded 3 openQuestions", seeded.ok && seeded.value.openQuestions.length === 3);
+  if (seeded.ok) {
+    const deleted = applyPatch(
+      seeded.value,
+      { state_patch: { "openQuestions[0]": null, "openQuestions[1]": null } },
+      14,
+    );
+    check(
+      "multi-index null deletion removes both targeted slots without index shift",
+      deleted.ok &&
+        deleted.value.openQuestions.length === 1 &&
+        deleted.value.openQuestions[0] === "q2",
+      deleted.ok ? JSON.stringify(deleted.value.openQuestions) : JSON.stringify(deleted.error),
+    );
+  }
+}
+
 finish();

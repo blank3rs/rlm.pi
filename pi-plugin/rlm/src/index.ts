@@ -23,7 +23,7 @@ import { buildSessionGates, type SubcallGates } from "./util/concurrency.ts";
 import { BackgroundTasks } from "./tool/background-tasks.ts";
 import { resolve } from "node:path";
 import { resolveSource } from "./context/resolve.ts";
-import { formatContextListing } from "./context/listing.ts";
+import { formatContextListing, workspacePathSignature } from "./context/listing.ts";
 import { extractEditPaths, readDiskFile } from "./context/refresh.ts";
 import type { AddContextHandlerBundle } from "./bridge/add-context.ts";
 import { buildNativeSystemPrompt } from "./prompts/native.ts";
@@ -90,6 +90,7 @@ export default function rlmExtension(pi: ExtensionAPI): void {
   // reads it per run, so /rlm-config and session resets never stale this wire).
   controller.onRunState = (state) => { rootTracker?.absorbEngineState(state); };
   let onSandboxDiscardExtra: (() => void) | undefined;
+  let resetSessionLedgerBudget: (() => void) | undefined;
   const sandboxManager = new SandboxManager({
     execTimeoutS: config.execTimeoutS,
     requestTimeoutMs: config.requestTimeoutMs,
@@ -188,11 +189,13 @@ export default function rlmExtension(pi: ExtensionAPI): void {
   /** Live add_context bundle — seed plants the "" sentinel here so add_context(".") is a no-op. */
   let contextBundleRef: AddContextHandlerBundle | undefined;
   /**
-   * Payload identity last injected into the context hook. Re-inject only when the payload
-   * reference changes (seed, add_context, reset) — not every turn. Keeps the root window small.
+   * Cached workspace listing block for `pi.on("context")`. Keyed by `workspacePathSignature`
+   * (excluding `ctx/session-log/*` archive segments and in-place content edits) and prepended
+   * consistently at `filtered[0]` on every turn so `messages[0]` never oscillates or busts
+   * the provider's KV prefix cache.
    */
-  let listingPayloadRef: unknown = undefined;
-  let listingInjected = false;
+  let cachedListingSig: string | undefined;
+  let cachedListingText = "";
   const seedContext = async (cwd: string): Promise<void> => {
     if (cwdSeeded) return;
     if (!controller.config.autoSeedCwd) {
@@ -379,6 +382,7 @@ export default function rlmExtension(pi: ExtensionAPI): void {
           onRunState: (state) => { rootTracker?.absorbEngineState(state); },
           getSkillBlock: composeSkillBlock,
           registerDiscardHook: (reset) => { onSandboxDiscardExtra = reset; },
+          registerLedgerReset: (reset) => { resetSessionLedgerBudget = reset; },
           registerContextBundle: (bundle) => {
             contextBundleRef = bundle;
             // Tool re-registers each session; re-plant sentinel if seed already landed.
@@ -444,6 +448,7 @@ export default function rlmExtension(pi: ExtensionAPI): void {
   // ── System prompt: native RLM mode addendum (only when the trade holds) ──
   pi.on("before_agent_start", async (event) => {
     if (!nativeTradeHolds()) return;
+    resetSessionLedgerBudget?.();
     // Root Σ: lazy tracker birth on the session's first prompt (the task IS that prompt).
     rootTracker ??= RootStateTracker.fresh(event.prompt, controller.config.runStateRetryMax);
     // Ξ (Workstream C / Root Σ WS-1): the block is PER-PROMPT text — BM25 ranks the store
@@ -457,9 +462,10 @@ export default function rlmExtension(pi: ExtensionAPI): void {
       if (traceEnabled) trace("root-xi.compose", { total: xiCompositions, chars: xi.length });
     }
     const xiPart = xi === undefined ? "" : `${xi}\n\n`;
-    // Root Σ WS-4: the user's latest ask IS the next step by definition; feed the tracker
+    // Root Σ WS-4: the user's latest ask IS the next step by definition unless the model
+    // has already authored a roadmap nextStep via a ```state fence; feed the tracker
     // before the turn so the Σ snapshot in this turn's context carries it.
-    rootTracker?.setNextStep(event.prompt);
+    rootTracker?.setNextStep(event.prompt, { preserveModelAuthored: true });
     // Root Σ WS-4.2 (enableRootStateFences): a rejected ΔΣ_t from the previous turn surfaces
     // as an observation message — the same error-as-observation retry ladder engine runs use.
     const observation = rootTracker?.takePendingObservation();
@@ -621,6 +627,7 @@ export default function rlmExtension(pi: ExtensionAPI): void {
             keepTurns: controller.config.rootContextKeepTurns,
             elideChars: controller.config.rootContextElideChars,
             archiveActive: sink !== undefined,
+            elideStep: Math.max(2, Math.floor(controller.config.rootContextKeepTurns / 2)),
           },
           sink,
         );
@@ -629,18 +636,16 @@ export default function rlmExtension(pi: ExtensionAPI): void {
         // R4 REV (amnesia fix): degrade suspends fence WRITES (applyFences gate) — never Σ
         // READBACK. SKILL.state §5.3 makes elision lossless precisely because Σ rides with
         // the elided turns; stubbing history while withholding Σ amnesia-loops the agent
-        // (announce-continue-then-stop). Splice whenever Σ has content, active or degraded;
-        // the fence CONTRACT rides only while active — a degraded tracker ignores fences
-        // (applyFences early-returns), so teaching the contract is pure tax.
+        // (announce-continue-then-stop). Splice whenever Σ has content, active or degraded.
+        // While active, `before_agent_start` already places `STATE_FENCE_INSTRUCTION` in the
+        // system prompt; include `withContract` inside `rlm-sigma` only when degraded so the
+        // 1,280-char contract is never duplicated on normal turns yet remains available for recovery.
         if (
           controller.config.rootContextSnapshot && tracker !== undefined &&
           !tracker.isEmpty
         ) {
           spliceSigmaSnapshot(filtered, tracker.snapshot(), tracker.rectifyHint(), {
-            // R7-fix: teach the contract while DEGRADED too — it is the only road back.
-            // Recovery is a clean fence; hiding the notation after degrade made the
-            // amnesia window permanent (the fence turns that taught it get elided).
-            withContract: controller.config.enableRootStateFences,
+            withContract: !tracker.isActive && controller.config.enableRootStateFences,
           });
           sigmaSplices += 1;
         }
@@ -678,9 +683,9 @@ export default function rlmExtension(pi: ExtensionAPI): void {
     type PiMessage = (typeof filtered)[number];
 
     const payload = sandboxManager.contextPayload;
-    if (!listingInjected || payload !== listingPayloadRef) {
-      listingInjected = true;
-      listingPayloadRef = payload;
+    const sig = workspacePathSignature(payload);
+    if (cachedListingSig !== sig) {
+      cachedListingSig = sig;
       const listing = formatContextListing(payload);
       const instruction = [
         "Prefer repl({code}) for bulk analysis: free search/grep/outline, then fan-out Tasks.",
@@ -690,13 +695,13 @@ export default function rlmExtension(pi: ExtensionAPI): void {
         "add_context(path) for external dirs/files/docs/git. Credits exhausted → report and stop.",
         "",
       ].join("\n");
-      filtered.unshift({
-        role: "user" as const,
-        content: instruction + listing,
-        timestamp: 0,
-      } as PiMessage);
+      cachedListingText = instruction + listing;
     }
-
+    filtered.unshift({
+      role: "user" as const,
+      content: cachedListingText,
+      timestamp: 0,
+    } as PiMessage);
 
     return { messages: filtered };
   });
@@ -722,13 +727,6 @@ export default function rlmExtension(pi: ExtensionAPI): void {
         failed ? firstLine(text) : "",
       );
       if (subFailed !== undefined) tracker.observeToolResult("subcall", true, subFailed);
-      // Recall W2 deterministic harvest (commit-at-first-sight, paper §7): successful reads
-      // are Σ facts the moment they happen — previously the only runtime feeds were tool
-      // ERRORS and edits, so the early turns (the ones elided first) never reached Σ.
-      if (!failed && event.toolName === "read") {
-        const path = extractEditPaths(event.input)[0];
-        if (path !== undefined) tracker.noteFact(touchFact("read", path));
-      }
     }
 
     // ── Keep RLM context fresh after native file mutations ──
@@ -745,8 +743,6 @@ export default function rlmExtension(pi: ExtensionAPI): void {
         rootTracker?.noteFact(touchFact("edited", p));
         try {
           await sandboxManager.refreshFileFromDisk(p, body, cwd);
-          // Listing must re-inject if we rewrote payload identity
-          listingPayloadRef = undefined;
         } catch (err) {
           if (traceEnabled) {
             trace("context.refresh_fail", { path: p, error: errorMessage(err) });
@@ -808,8 +804,8 @@ export default function rlmExtension(pi: ExtensionAPI): void {
     cwdSeeded = false;
     seedPromise = undefined;
     contextBundleRef = undefined;
-    listingPayloadRef = undefined;
-    listingInjected = false;
+    cachedListingSig = undefined;
+    cachedListingText = "";
     skillStore = undefined;
     rootTracker = undefined;
     sandboxManager.contextPayload = [];

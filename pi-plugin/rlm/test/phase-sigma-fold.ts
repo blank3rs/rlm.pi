@@ -178,6 +178,25 @@ const fenced = (json: string): string => "```state\n" + json + "\n```";
   check("fold: ```json quotation untouched", foldStateFences(quote, "d") === quote, "");
   const mixed = `${fenced('{"state_patch": {"verifiedFacts[+]": ["1"]}}')}\n{"state_patch": {"verifiedFacts[+]": ["2"]}}`;
   check("fold: fence + bare → digest once", foldStateFences(mixed, "D").split("> D").length === 2 && !foldStateFences(mixed, "D").includes("state_patch"), "");
+
+  // Variants seen in live sessions: "``` state", "```state fence", and "```\nstate fence"
+  for (const [label, header] of [
+    ["space before state", "``` state\n"],
+    ["trailing fence word", "```state fence\n"],
+    ["next-line state header", "```\nstate fence\n"],
+  ] as const) {
+    const raw = `Prose before.\n\n${header}{\n  "state_patch": {"verifiedFacts[+]": ["v1"]}\n}\n\`\`\``;
+    const patches = findStatePatches(raw);
+    const folded = foldStateFences(raw, "**Σ recorded:**\n- fact v1");
+    check(
+      `fold (${label}): parsed + folded cleanly without outer fence residue`,
+      patches.length === 1 &&
+        patches[0]?.ok === true &&
+        !folded.includes("```") &&
+        folded.includes("> **Σ recorded:**"),
+      folded,
+    );
+  }
 }
 
 // ── FoldRegistry: fold on screen, original restored on the wire clone ──

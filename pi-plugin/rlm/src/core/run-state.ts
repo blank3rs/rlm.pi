@@ -132,8 +132,8 @@ export function isTouchFact(text: string): boolean {
   return TOUCH_FACT_RE.test(text);
 }
 
-/** Tool-outcome keys (`tool:bash: …`) are Σ bookkeeping, not project facts. */
-const TOOL_OUTCOME_TEXT = /^tool:[A-Za-z0-9_-]+:/;
+/** Tool-outcome keys (`tool:bash: …` or `tool:edit — …`) are Σ bookkeeping, not project facts. */
+const TOOL_OUTCOME_TEXT = /^tool:[A-Za-z0-9_-]+(?::|\s+[—–-])/;
 /** Exact `read <path>` / `edited <path>` lines. A gotcha whose key starts with "read " is not one. */
 const EXACT_TOUCH = /^(?:read|edited) \S+$/;
 
@@ -155,22 +155,23 @@ const CONTINUATION_HEAD = /^\[continuation \d+\]/;
  * Σ task / note context: the original ask.
  * A continuation prompt's first 200 chars are the handoff header ("hit its token cap"),
  * which used to become every distilled note's BM25 context. When that header is present,
- * the ORIGINAL TASK section is the identity; otherwise the text is itself.
+ * the ORIGINAL TASK section is the identity; if the string was pre-truncated before
+ * ORIGINAL TASK appeared, return "" so continuation boilerplate never pollutes BM25.
  */
 export function taskIdentity(task: string): string {
   const trimmed = task.trim();
   if (!CONTINUATION_HEAD.test(trimmed)) return trimmed.slice(0, TASK_MAX_CHARS);
   const marker = "ORIGINAL TASK:\n";
   const at = trimmed.indexOf(marker);
-  if (at < 0) return trimmed.slice(0, TASK_MAX_CHARS);
+  if (at < 0) return "";
   const rest = trimmed.slice(at + marker.length);
   const split = rest.search(/\n\s*\n/);
   const ask = (split >= 0 ? rest.slice(0, split) : rest).trim();
-  return (ask.length > 0 ? ask : trimmed).slice(0, TASK_MAX_CHARS);
+  return (ask.length > 0 ? ask : "").slice(0, TASK_MAX_CHARS);
 }
 const STATE_VALUE_MAX_CHARS = 120;
-// `findings` | `findings[+]` | `findings[2]` | `testedApproaches.h1`
-const PATCH_KEY = /^([a-zA-Z_][a-zA-Z0-9_]*)((?:\.[a-zA-Z_][a-zA-Z0-9_]*)*)(\[\+\]|\[\d+\])?$/;
+// `findings` | `findings[+]` | `findings[2]` | `testedApproaches.h1` | `artifacts.crates/hf_app.status`
+const PATCH_KEY = /^([a-zA-Z_][a-zA-Z0-9_]*)((?:\.[a-zA-Z0-9_/:~-]+)*)(\[\+\]|\[\d+\])?$/;
 
 /** Fail-soft contract clamp — every string Σ value honors the promised ≤120 chars. */
 function clampStateValue(value: string): string {
@@ -446,6 +447,37 @@ function applyKey(draft: MutableState, rawKey: string, value: unknown): Result<n
     return err({ kind: "schema", detail: `field "${root}" takes no sub-paths` });
   }
   if (middles.length === 0 && op !== undefined) {
+    if (root === "artifacts" && op === "[+]") {
+      const items: readonly unknown[] | undefined =
+        typeof value === "string" || isPlainObject(value)
+          ? [value]
+          : Array.isArray(value)
+            ? value
+            : undefined;
+      if (items === undefined) {
+        return err({ kind: "type", path: rawKey, expected: "string | object | (string | object)[]" });
+      }
+      const record: Record<string, unknown> = { ...draft.artifacts };
+      for (const rawItem of items) {
+        if (typeof rawItem === "string") {
+          const trimmed = rawItem.trim();
+          if (trimmed === "") continue;
+          const sep = /\s+[—–-]\s+|\s*:\s*/.exec(trimmed);
+          const artKey = (sep !== null ? trimmed.slice(0, sep.index).trim() : trimmed.slice(0, 48)) || "artifact";
+          const artVal = sep !== null ? trimmed.slice(sep.index + sep[0].length).trim() : trimmed;
+          refreshOrder(record, artKey, clampStateValue(artVal || trimmed));
+        } else if (isPlainObject(rawItem)) {
+          for (const [k, v] of Object.entries(rawItem)) {
+            if (typeof v !== "string") return err({ kind: "type", path: rawKey, expected: "string" });
+            refreshOrder(record, k, clampStateValue(v));
+          }
+        } else {
+          return err({ kind: "type", path: rawKey, expected: "string | object" });
+        }
+      }
+      commitRecord(draft, "artifacts", record);
+      return ok(null);
+    }
     return err({ kind: "type", path: rawKey, expected: "object (records use dotted keys)" });
   }
   if (middles.length === 0) {
@@ -457,7 +489,13 @@ function applyKey(draft: MutableState, rawKey: string, value: unknown): Result<n
     }
     if (!isPlainObject(value)) return err({ kind: "type", path: rawKey, expected: "object" });
     const prev = root === "testedApproaches" ? draft.testedApproaches : draft.artifacts;
-    const merged = strictMergeRecord(prev, value, root);
+    const normalizedPatch: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value)) {
+      normalizedPatch[k] = root === "testedApproaches" && v !== null
+        ? (normalizeOutcomeCandidate(v, isPlainObject(prev[k])) ?? v)
+        : v;
+    }
+    const merged = strictMergeRecord(prev, normalizedPatch, root);
     if (!merged.ok) return merged;
     if (root === "testedApproaches") draft.testedApproaches = merged.value;
     else draft.artifacts = merged.value;
@@ -469,6 +507,19 @@ function applyKey(draft: MutableState, rawKey: string, value: unknown): Result<n
   // Dotted entry write: create-or-replace one entry; null deletes it.
   const record: Record<string, unknown> =
     root === "testedApproaches" ? { ...draft.testedApproaches } : { ...draft.artifacts };
+  if (root === "artifacts" && middles.length > 1) {
+    const flatKey = middles.join(".");
+    if (value === null) {
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- ⊕ null = delete
+      delete record[flatKey];
+      commitRecord(draft, root, record);
+      return ok(null);
+    }
+    if (typeof value !== "string") return err({ kind: "type", path: rawKey, expected: "string" });
+    refreshOrder(record, flatKey, clampStateValue(value));
+    commitRecord(draft, root, record);
+    return ok(null);
+  }
   let cursor = record;
   for (let i = 0; i < middles.length - 1; i++) {
     const segment = middles[i];
@@ -509,12 +560,13 @@ function applyKey(draft: MutableState, rawKey: string, value: unknown): Result<n
     return ok(null);
   }
   if (root === "testedApproaches") {
-    if (middles.length !== 1 || !isPlainObject(value) || !isApproachOutcome(value)) {
+    const prev: unknown = cursor[leaf];
+    const normalized = normalizeOutcomeCandidate(value, isPlainObject(prev));
+    if (middles.length !== 1 || normalized === undefined || !isApproachOutcome(normalized)) {
       return err({ kind: "type", path: rawKey, expected: APPROACH_OUTCOME_HINT });
     }
     // Contract clamp: outcome strings honor the promised ≤120 chars (nulls stay nulls).
-    const outcome = clampOutcomeRecord(value);
-    const prev: unknown = cursor[leaf];
+    const outcome = clampOutcomeRecord(normalized);
     const merged = isPlainObject(prev)
       ? strictMergeRecord(prev, outcome, rawKey)
       : ok<Record<string, unknown>, PatchError>(outcome);
@@ -526,6 +578,58 @@ function applyKey(draft: MutableState, rawKey: string, value: unknown): Result<n
   }
   commitRecord(draft, root, record);
   return ok(null);
+}
+
+const SHORTHAND_OUTCOME_RE = /^(succeeded|success|passed|ok|done|failed|fail|error|partial|in_progress|pending)\s*(?:[:—–-]\s*|\s+)(.+)$/i;
+
+function normalizeOutcomeStatus(raw: unknown): "failed" | "partial" | "succeeded" | undefined {
+  if (typeof raw !== "string") return undefined;
+  const lower = raw.trim().toLowerCase();
+  if (lower === "succeeded" || lower === "success" || lower === "passed" || lower === "ok" || lower === "done") return "succeeded";
+  if (lower === "failed" || lower === "fail" || lower === "error") return "failed";
+  if (lower === "partial" || lower === "in_progress" || lower === "pending") return "partial";
+  return undefined;
+}
+
+function canonicalOutcomeField(status: "failed" | "partial" | "succeeded"): "reason" | "note" | "evidence" {
+  if (status === "failed") return "reason";
+  if (status === "partial") return "note";
+  return "evidence";
+}
+
+/**
+ * Normalize unambiguous model outcome variations (status synonyms like `"success"` → `"succeeded"`,
+ * string shorthand `"succeeded — 18/18 pass"` on new entries, or detail-field aliases on new entries)
+ * while preserving strict implicit-drop detection when updating an existing entry (`hasPrev === true`).
+ */
+function normalizeOutcomeCandidate(value: unknown, hasPrev: boolean): Record<string, unknown> | undefined {
+  if (typeof value === "string" && !hasPrev) {
+    const m = SHORTHAND_OUTCOME_RE.exec(value.trim());
+    if (m === null) return undefined;
+    const status = normalizeOutcomeStatus(m[1]);
+    const detail = (m[2] ?? "").trim();
+    if (status === undefined || detail === "") return undefined;
+    return { status, [canonicalOutcomeField(status)]: detail };
+  }
+  if (!isPlainObject(value)) return undefined;
+  const status = normalizeOutcomeStatus(value.status);
+  if (status === undefined) return undefined;
+  const required = canonicalOutcomeField(status);
+  if (typeof value[required] === "string") {
+    return value.status === status ? value : { ...value, status };
+  }
+  if (hasPrev) return undefined;
+  for (const alt of ["reason", "note", "evidence", "detail", "summary"]) {
+    if (typeof value[alt] === "string") {
+      const out: Record<string, unknown> = { ...value, status, [required]: value[alt] };
+      if (alt !== required) {
+        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- remap alias key on fresh entry
+        delete out[alt];
+      }
+      return out;
+    }
+  }
+  return undefined;
 }
 
 function isRecordField(root: string): root is "testedApproaches" | "artifacts" {
@@ -548,6 +652,82 @@ function refreshOrder(record: Record<string, unknown>, key: string, value: unkno
   record[key] = value;
 }
 
+const APPROACH_LEAF_KEY = /^testedApproaches\.([a-zA-Z0-9_-]+)\.([a-zA-Z0-9_-]+)$/;
+const ARRAY_INDEX_KEY = /^([a-zA-Z_][a-zA-Z0-9_]*)\[(\d+)\]$/;
+
+/**
+ * Coalesce multi-key dotted leaf writes to the same `testedApproaches.<id>` within one patch
+ * (e.g. `{"testedApproaches.h2.status": "succeeded", "testedApproaches.h2.evidence": "ok"}`),
+ * and sort multi-index array `null` deletions in descending index order so deleting `[3]` does
+ * not shift `[4]`/`[5]` out of range. Single-field writes (`count === 1`) stay untouched.
+ */
+function preprocessPatchOps(
+  ops: readonly (readonly [string, unknown])[],
+  prevApproaches: Readonly<Record<string, unknown>>,
+): readonly (readonly [string, unknown])[] {
+  const approachGroups = new Map<string, Array<readonly [string, unknown]>>();
+  for (const [key, value] of ops) {
+    const m = APPROACH_LEAF_KEY.exec(key);
+    if (m !== null) {
+      const id = m[1];
+      const list = approachGroups.get(id) ?? [];
+      list.push([m[2], value]);
+      approachGroups.set(id, list);
+    }
+  }
+  const coalescedIds = new Set<string>();
+  for (const [id, fields] of approachGroups) {
+    if (fields.length >= 2) coalescedIds.add(id);
+  }
+  const emittedApproaches = new Set<string>();
+  const stage1: Array<readonly [string, unknown]> = [];
+  for (const [key, value] of ops) {
+    const m = APPROACH_LEAF_KEY.exec(key);
+    if (m !== null && coalescedIds.has(m[1])) {
+      const id = m[1];
+      if (emittedApproaches.has(id)) continue;
+      emittedApproaches.add(id);
+      const fields = approachGroups.get(id) ?? [];
+      const prevEntry = prevApproaches[id];
+      const merged: Record<string, unknown> = isPlainObject(prevEntry) ? { ...prevEntry } : {};
+      for (const [leaf, val] of fields) {
+        merged[leaf] = val;
+      }
+      const normStatus = normalizeOutcomeStatus(merged.status);
+      if (normStatus !== undefined && isPlainObject(prevEntry)) {
+        const reqField = canonicalOutcomeField(normStatus);
+        if (typeof merged[reqField] === "string") {
+          for (const staleKey of ["reason", "note", "evidence"]) {
+            if (staleKey !== reqField && staleKey in prevEntry && !(staleKey in Object.fromEntries(fields))) {
+              merged[staleKey] = null;
+            }
+          }
+        }
+      }
+      stage1.push([`testedApproaches.${id}`, merged]);
+      continue;
+    }
+    stage1.push([key, value]);
+  }
+  // Sort array `[N]: null` deletions in descending index order per array field.
+  const regular: Array<readonly [string, unknown]> = [];
+  const arrayNullDeletes: Array<{ readonly field: string; readonly idx: number; readonly op: readonly [string, unknown] }> = [];
+  for (const entry of stage1) {
+    const [key, value] = entry;
+    if (value === null) {
+      const am = ARRAY_INDEX_KEY.exec(key);
+      if (am !== null && ARRAY_FIELDS.has(am[1])) {
+        arrayNullDeletes.push({ field: am[1], idx: Number.parseInt(am[2], 10), op: entry });
+        continue;
+      }
+    }
+    regular.push(entry);
+  }
+  if (arrayNullDeletes.length <= 1) return stage1;
+  arrayNullDeletes.sort((a, b) => (a.field === b.field ? b.idx - a.idx : a.field.localeCompare(b.field)));
+  return [...regular, ...arrayNullDeletes.map((d) => d.op)];
+}
+
 /**
  * V(ΔΣ_t, Σ_t) → Result<Σ_{t+1}, PatchError> — the deterministic, runtime-side validator
  * (paper §7). Invalid patches never touch the previous state (rollback is structural: the
@@ -557,14 +737,14 @@ export function applyPatch(prev: RunState, patch: unknown, t: number): Result<Ru
   if (!isStatePatch(patch)) {
     return err({ kind: "schema", detail: 'patch must be {"state_patch": {...}}' });
   }
-  const ops = Object.entries(patch.state_patch);
-  if (ops.length === 0) return err({ kind: "schema", detail: "empty state_patch" });
+  const rawOps = Object.entries(patch.state_patch);
+  if (rawOps.length === 0) return err({ kind: "schema", detail: "empty state_patch" });
   // Contract alignment (recall W2): the instruction promises ≤ 5 keys — a bigger patch is a
   // restatement, and restatements must come back as feedback, not silently inflate Σ.
-  if (ops.length > STATE_PATCH_MAX_KEYS) {
+  if (rawOps.length > STATE_PATCH_MAX_KEYS) {
     return err({
       kind: "schema",
-      detail: `${ops.length} keys — ≤ ${STATE_PATCH_MAX_KEYS} per patch; commit deltas only`,
+      detail: `${rawOps.length} keys — ≤ ${STATE_PATCH_MAX_KEYS} per patch; commit deltas only`,
     });
   }
   // Per-turn byte cap (bench rec #1): reject BEFORE the draft clone — a verbose restatement
@@ -574,6 +754,7 @@ export function applyPatch(prev: RunState, patch: unknown, t: number): Result<Ru
   }
   // JSON round-trip clone: RunState is JSON-safe by construction and stays well under κ_Σ.
   const draft = JSON.parse(JSON.stringify(prev)) as MutableState;
+  const ops = preprocessPatchOps(rawOps, draft.testedApproaches);
   for (const [key, value] of ops) {
     const applied = applyKey(draft, key, value);
     if (!applied.ok) return applied;

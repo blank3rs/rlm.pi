@@ -21,6 +21,8 @@ import type { BatchStop } from "./batch-stop.ts";
 import { createBatchStop } from "./batch-stop.ts";
 
 const NO_UNMATCHED: readonly string[] = Object.freeze([]);
+/** Maximum characters of matched file contents attached to a budget-demoted rlm_query leaf call. */
+const DEMOTED_CONTEXT_CAP_CHARS = 32_000;
 
 function emptyResult(answer: string): RlmResult {
   return {
@@ -55,6 +57,69 @@ function childContextFor(
     context: filtered.files.length > 0 ? filtered.files : inherited,
     unmatched: filtered.unmatched,
   });
+}
+
+function isPathContentEntry(v: unknown): v is { readonly path: string; readonly content: string } {
+  if (typeof v !== "object" || v === null) return false;
+  const r = v as Record<string, unknown>;
+  return typeof r.path === "string" && typeof r.content === "string";
+}
+
+/**
+ * When `rlmBudget` demotes `rlm_query(task, paths)` to a single leaf LLM completion, the leaf
+ * has no REPL sandbox to read `context`. Attach matched files (from explicit `paths` or paths /
+ * directory prefixes named in `task`, bounded by `DEMOTED_CONTEXT_CAP_CHARS`) so the leaf can
+ * answer instead of replying `NOT_FOUND`.
+ */
+function buildDemotedLeafPrompt(
+  deps: SubcallHandlerDeps,
+  task: string,
+  paths: readonly string[] | undefined,
+): string {
+  const inherited = deps.getChildContext?.();
+  if (!Array.isArray(inherited) || inherited.length === 0) return task;
+  const candidates: { readonly path: string; readonly content: string }[] = [];
+  for (let i = 0; i < inherited.length; i++) {
+    const entry: unknown = inherited[i];
+    if (isPathContentEntry(entry)) candidates.push(entry);
+  }
+  if (candidates.length === 0) return task;
+  const rawPrefixes =
+    paths !== undefined && paths.length > 0
+      ? paths
+      : (task.match(/[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)+\/?|[A-Za-z0-9_-]+\.[A-Za-z0-9]{1,6}\b/g) ?? []);
+  const normPrefixes = rawPrefixes
+    .map((p) => p.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "").toLowerCase())
+    .filter((p) => p.length >= 3);
+  const lowerTask = task.toLowerCase();
+  const matched: { readonly path: string; readonly content: string }[] = [];
+  for (let i = 0; i < candidates.length; i++) {
+    const entry = candidates[i];
+    if (entry === undefined) continue;
+    const normPath = entry.path.replace(/\\/g, "/").replace(/^\/+/, "").toLowerCase();
+    const hit =
+      (normPath.length >= 3 && lowerTask.includes(normPath)) ||
+      normPrefixes.some(
+        (pref) => normPath === pref || normPath.startsWith(`${pref}/`) || normPath.endsWith(`/${pref}`),
+      );
+    if (hit) matched.push(entry);
+  }
+  if (matched.length === 0) return task;
+  const budget = Math.max(1_000, Math.min(deps.getConfig().maxPromptChars - task.length - 256, DEMOTED_CONTEXT_CAP_CHARS));
+  const sections: string[] = [];
+  let used = 0;
+  for (let i = 0; i < matched.length; i++) {
+    const f = matched[i];
+    if (f === undefined || used >= budget) break;
+    const header = `--- ${f.path} ---\n`;
+    const avail = budget - used - header.length;
+    if (avail <= 0) break;
+    const body = f.content.length <= avail ? f.content : `${f.content.slice(0, avail)}\n...[truncated]`;
+    sections.push(`${header}${body}`);
+    used += header.length + body.length;
+  }
+  if (sections.length === 0) return task;
+  return `${task}\n\n[Context files in scope]\n${sections.join("\n\n")}`;
 }
 
 function claimKeyFor(deps: SubcallHandlerDeps, kind: "llm" | "rlm", prompt: string, paths: readonly string[], ctx: string): string {
@@ -204,6 +269,7 @@ export function createRlmQueryHandler(deps: SubcallHandlerDeps, sd: SpawnDeps) {
       rlmBudget > 0 &&
       ledger.rlmCount() >= rlmBudget
     ) {
+      const leafPrompt = buildDemotedLeafPrompt(deps, task, pathArg);
       return spawnAndRun(
         sd,
         "llm",
@@ -211,7 +277,7 @@ export function createRlmQueryHandler(deps: SubcallHandlerDeps, sd: SpawnDeps) {
         () =>
           runClaimedLeaf(
             ledger,
-            leafClaimKey(deps, task),
+            leafClaimKey(deps, leafPrompt),
             task,
             inv.depth,
             () =>
@@ -222,7 +288,7 @@ export function createRlmQueryHandler(deps: SubcallHandlerDeps, sd: SpawnDeps) {
                   label: "rlm_query→llm (demoted)",
                   args: previewText(task),
                 },
-                (track, note) => complete1(inv, task, track, completeDeps(deps), throttleHooks(note)),
+                (track, note) => complete1(inv, leafPrompt, track, completeDeps(deps), throttleHooks(note)),
                 summarizeLeaf,
               ),
           ),

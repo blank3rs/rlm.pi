@@ -40,6 +40,10 @@ export interface ElideOptions {
   /** When true (SessionArchive wired + enabled), stubs point at the searchable archive;
    *  when false they stay honest by promising less (no phantom recovery channel). */
   readonly archiveActive?: boolean;
+  /** Optional epoch quantization step (in assistant turns). When > 1, the elision cutoff
+   *  only advances in multiples of `elideStep` turns so consecutive tool calls within an
+   *  epoch do not mutate mid-history messages and bust the provider's KV prefix cache. */
+  readonly elideStep?: number;
 }
 
 /** One message the elision is about to destroy — the SessionArchive record shape. */
@@ -104,6 +108,32 @@ export function elideStalePayloads(
     // R5 strict-0: nothing inside the window — Σ + immune customs + the final user message
     // are all that survive verbatim.
     return elideRange(messages, 0, messages.length, opts, previewRing, onElide);
+  }
+
+  const step = opts.elideStep !== undefined && opts.elideStep > 1
+    ? Math.floor(opts.elideStep)
+    : 1;
+  if (step > 1) {
+    let totalAssistants = 0;
+    for (let i = 0; i < messages.length; i++) {
+      if (messages[i]?.role === "assistant") totalAssistants += 1;
+    }
+    if (totalAssistants <= keepTurns) return 0;
+    const quantizedStale = Math.floor((totalAssistants - keepTurns) / step) * step;
+    if (quantizedStale <= 0) return 0;
+    let tailStart = -1;
+    let seenStale = 0;
+    for (let i = 0; i < messages.length; i++) {
+      if (messages[i]?.role === "assistant") {
+        if (seenStale === quantizedStale) {
+          tailStart = i;
+          break;
+        }
+        seenStale += 1;
+      }
+    }
+    if (tailStart <= 0) return 0;
+    return elideRange(messages, 0, tailStart, opts, previewRing, onElide);
   }
 
   // Index of the assistant message that opens the keepTurns-th-from-last turn — everything
@@ -221,7 +251,7 @@ export function spliceSigmaSnapshot(
     content: text,
     display: false,
     details: { kind: "sigma-snapshot", updatedAt: state.updatedAt },
-    timestamp: Date.now(),
+    timestamp: 0,
   } as RootMessage;
   if (at < 0) {
     messages.push(sigma); // no user message (degenerate) — append; still exactly one

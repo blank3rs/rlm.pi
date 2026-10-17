@@ -47,13 +47,13 @@ export type StateFenceResult =
   | { readonly ok: true; readonly value: unknown }
   | { readonly ok: false; readonly error: string };
 
-const STATE_FENCE = /(`{3,})[ \t]*state[ \t]*\r?\n([\s\S]*?)\1/g;
+const STATE_FENCE = /(`{3,})[ \t]*(?:state\b[^\r\n]*\r?\n|\r?\n[ \t]*state\b[^\r\n]*\r?\n)([\s\S]*?)\1/g;
 
 /** Tolerant fallback: a payload object whose FIRST key is the patch key, emitted without a
  *  (well-formed) fence — soak keeps catching `...report.state {"state_patch": …}}` blobs from
  *  small models that mangle the opening backticks. Matched literally so ordinary prose or
  *  example JSON never trips the scanner. */
-const BARE_PATCH = /\{"state_patch"\s*:/g;
+const BARE_PATCH = /\{\s*"state_patch"\s*:/g;
 
 /** Recall W2 fence-echo fix: ```json fences are the EXAMPLE/quote channel — the system
  *  prompt itself shows `{"state_patch": …}` in a json-fenced example, and models echo it.
@@ -141,18 +141,24 @@ export function foldStateFences(text: string, fold: string): string {
     if (insideSpans(jsonSpans, m.index)) continue;
     const obj = balancedJsonObject(rest, m.index);
     if (obj === undefined) continue;
-    parts.push(rest.slice(cursor, m.index), place());
+    const before = rest.slice(cursor, m.index).replace(/\s*(?:\.?state(?:\s+fence)?)\s*$/i, "");
+    const placedText = place();
+    const sep = placedText !== "" && before.length > 0 && !before.endsWith("\n") ? "\n\n" : "";
+    parts.push(before, sep + placedText);
     cursor = m.index + obj.length;
     BARE_PATCH.lastIndex = cursor;
   }
   if (parts.length === 0) return rest;
   parts.push(rest.slice(cursor));
-  return parts.join("");
+  return parts.join("").replace(ORPHAN_FENCE, "");
 }
+
+const HAS_STATE_FENCE = /`{3,}[ \t]*(?:state\b|\r?\n[ \t]*state\b)/;
+const HAS_BARE_PATCH = /\{\s*"state_patch"\s*:/;
 
 /** Cheap pre-check shared by the fold and its caller: could `text` hold a state patch? */
 export function hasStatePatch(text: string): boolean {
-  return text.includes("```state") || text.includes('{"state_patch"');
+  return HAS_STATE_FENCE.test(text) || HAS_BARE_PATCH.test(text);
 }
 
 /** A dangling opener/closer pair after the fence body was mangled (e.g. `.state {…}}` followed
@@ -244,7 +250,7 @@ export function stripStateFences(text: string): string {  let out = sansFences(t
     const obj = balancedJsonObject(out, m.index);
     if (obj === undefined) continue;
     // Glom any immediately-preceding bare `state`/`.state` token (prose like "...report.state {").
-    const before = out.slice(cursor, m.index).replace(/\s*(?:\.?state)\s*$/i, "");
+    const before = out.slice(cursor, m.index).replace(/\s*(?:\.?state(?:\s+fence)?)\s*$/i, "");
     parts.push(before);
     cursor = m.index + obj.length;
     BARE_PATCH.lastIndex = cursor;

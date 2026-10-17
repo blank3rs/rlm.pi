@@ -218,6 +218,8 @@ try {
   const handoff = "[continuation 1]\nA prior RLM run hit its token cap mid-task.\n\nORIGINAL TASK:\nstudy the cipher\n\nCONFIRMED FINDINGS SO FAR:\nnone\n";
   check("task identity is the original ask", taskIdentity(handoff) === "study the cipher");
   check("task identity leaves a normal ask alone", taskIdentity("study the cipher") === "study the cipher");
+  const truncatedHandoff = "[continuation 1]\nA prior RLM run hit its token cap mid-task. This is a handoff — do NOT";
+  check("truncated continuation header without ORIGINAL TASK collapses to empty", taskIdentity(truncatedHandoff) === "");
 
   writeFileSync(FILE, JSON.stringify({
     version: 1,
@@ -225,6 +227,7 @@ try {
       p: [
         { id: "aaaaaaaaaaaaaaaa", text: "edited src/a.ts", keywords: [], tags: ["symbol"], context: "x", hits: 1, ts: 1 },
         { id: "bbbbbbbbbbbbbbbb", text: "tool:bash: ", keywords: [], tags: ["recipe"], context: "x", hits: 1, ts: 2 },
+        { id: "dddddddddddddddd", text: "tool:bash — succeeded (recovered after 2 failures)", keywords: [], tags: ["recipe"], context: "x", hits: 1, ts: 2 },
         { id: "cccccccccccccccc", text: "cipher/cyber.rs — sign-only", keywords: ["cipher"], tags: ["symbol"], context: handoff, hits: 1, ts: 3 },
       ],
     },
@@ -232,7 +235,7 @@ try {
   const tracked = await loadSkillStateTracked(tmp);
   check("load reports dropped bookkeeping", tracked.dropped);
   const kept = tracked.file.projects.p ?? [];
-  check("load keeps the real note only", kept.length === 1 && kept[0]?.text.includes("cipher/cyber.rs"));
+  check("load keeps the real note only (drops colon and em-dash tool:* notes)", kept.length === 1 && kept[0]?.text.includes("cipher/cyber.rs"));
   check("load strips continuation boilerplate from note context", kept[0]?.context === "study the cipher");
   const flushed = await SkillStore.hydrate(128, tmp);
   check("filtered load flushes", await flushed.flush());

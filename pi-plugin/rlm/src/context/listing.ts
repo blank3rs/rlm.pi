@@ -52,9 +52,34 @@ export function formatContextListing(context: unknown): string {
     listingParts.join("\n"),
     truncated,
     "",
-    "File contents are loaded in the REPL `context` variable — file-reading tools are disabled.",
+    "File contents are pre-loaded in REPL `context` (`list[dict]` with `path`, `content`, `tokens`) — iterate `context` or use `search`/`grep_context`/`outline` in `repl({code})`.",
     "Use repl({code}) and delegate semantic reading to llm_query / llm_batch / llm_query_chunked.",
   ].join("\n");
+}
+
+/** Prefix used by SessionArchive segments materialized into the sandbox. */
+const ARCHIVE_PATH_PREFIX = "ctx/session-log/";
+
+function isWorkspaceContextFile(entry: unknown): entry is ContextFile {
+  return isContextFile(entry) && !entry.path.startsWith(ARCHIVE_PATH_PREFIX);
+}
+
+/**
+ * Stable path-set signature of loaded workspace/external context files (excluding
+ * `ctx/session-log/*` archive segments and ignoring in-place content edits so `edit`
+ * tool calls do not mutate `messages[0]` and bust the provider KV prefix cache).
+ */
+export function workspacePathSignature(context: unknown): string {
+  if (!Array.isArray(context) || context.length === 0) return "";
+  const paths = new Array<string>(context.length);
+  let n = 0;
+  for (let i = 0; i < context.length; i++) {
+    const entry: unknown = context[i];
+    if (isWorkspaceContextFile(entry)) paths[n++] = entry.path;
+  }
+  if (n === 0) return "";
+  paths.length = n;
+  return `${n}:${paths.join("\n")}`;
 }
 
 function toFileList(context: unknown): readonly ContextFile[] {
@@ -63,7 +88,7 @@ function toFileList(context: unknown): readonly ContextFile[] {
   let n = 0;
   for (let i = 0; i < context.length; i++) {
     const entry: unknown = context[i];
-    if (isContextFile(entry)) out[n++] = entry;
+    if (isWorkspaceContextFile(entry)) out[n++] = entry;
   }
   out.length = n;
   return out;
