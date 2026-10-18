@@ -12,7 +12,7 @@ list: `run.ts` and `hero.py` both read it.
 |---|---|
 | `zai/glm-5.3` | `ZAI_API_KEY` (Z.ai coding-plan endpoint) |
 | `b-ai/qwen3.8-27b` | `BAI_API_KEY` (`https://api.b.ai/v1`) |
-| `openrouter/openai/gpt-oss-120b` | `OPENROUTER_API_KEY` |
+| `openrouter/google/gemma-4-31b-it:free` | `OPENROUTER_API_KEY` |
 
 To change the panel, edit `panel.json`. Do not add model names to the code.
 

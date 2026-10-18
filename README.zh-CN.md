@@ -51,9 +51,9 @@
 
 | 模型 | OOLONG | token/任务 | 成本/任务 |
 |---|---|---|---|
-| `zai/glm-5.3` | 待测 | — | — |
-| `b-ai/qwen3.8-27b` | 待测 | — | — |
-| `openrouter/openai/gpt-oss-120b` | 待测 | — | — |
+| `zai/glm-5.3` | **95.8%** (23/24) | **~28k** | ~$0.00 \* |
+| `b-ai/qwen3.8-27b` | **91.7%** (22/24) | ~37k | ~$0.00 \* |
+| `openrouter/google/gemma-4-31b-it:free` | 待测 | — | — |
 
 模型列表见 [`bench/panel.json`](bench/panel.json)。每个模型有自己的结果目录：
 `bench/runs/<model>/`。运行全部模型：

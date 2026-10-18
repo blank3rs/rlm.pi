@@ -1,0 +1,20 @@
+{
+  "gitRev": "ac7840e",
+  "startedAt": "2026-10-18T19:25:18.237Z",
+  "model": "b-ai/qwen3.8-27b",
+  "subModel": null,
+  "suite": "oolong",
+  "limit": null,
+  "taskIds": null,
+  "oolongMaxCl": 65536,
+  "oolongLimit": 24,
+  "oolongLabels": false,
+  "runs": 1,
+  "maxIterations": null,
+  "temperature": 0,
+  "skillState": true,
+  "pricing": {
+    "inputPerToken": 0,
+    "outputPerToken": 0
+  }
+}

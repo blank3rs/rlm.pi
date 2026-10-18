@@ -39,9 +39,9 @@ pi uninstall npm:@hicaru/pi-rlm
 
 | 模型 | OOLONG | token/任务 | 成本/任务 |
 |---|---|---|---|
-| `zai/glm-5.3` | 待测 | — | — |
-| `b-ai/qwen3.8-27b` | 待测 | — | — |
-| `openrouter/openai/gpt-oss-120b` | 待测 | — | — |
+| `zai/glm-5.3` | **95.8%** (23/24) | **~28k** | ~$0.00 \* |
+| `b-ai/qwen3.8-27b` | **91.7%** (22/24) | ~37k | ~$0.00 \* |
+| `openrouter/google/gemma-4-31b-it:free` | 待测 | — | — |
 
 模型列表见 `bench/panel.json`，结果见 `bench/runs/<model>/`。
 运行方法见[根目录 README](https://github.com/openzebra/rlm.pi/blob/master/README.zh-CN.md#基准测试)。

@@ -43,9 +43,9 @@ The benchmark is **OOLONG** (oolong-synth): 24 tasks, context up to 65,536 token
 
 | Model | OOLONG | Tokens/task | Cost/task |
 |---|---|---|---|
-| `zai/glm-5.3` | pending | — | — |
-| `b-ai/qwen3.8-27b` | pending | — | — |
-| `openrouter/openai/gpt-oss-120b` | pending | — | — |
+| `zai/glm-5.3` | **95.8%** (23/24) | **~28k** | ~$0.00 \* |
+| `b-ai/qwen3.8-27b` | **91.7%** (22/24) | ~37k | ~$0.00 \* |
+| `openrouter/google/gemma-4-31b-it:free` | pending | — | — |
 
 The model list is in `bench/panel.json`. The results are in `bench/runs/<model>/`.
 To run the benchmark, see the
