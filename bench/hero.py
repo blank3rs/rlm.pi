@@ -37,7 +37,7 @@ BENCH_LINE = "OOLONG (oolong-synth)  ·  context ≤ 65,536 tok  ·  temp 0  · 
 # Canonical model set = bench/panel.json — anything else in the journals must never chart.
 with open(os.path.join(ROOT, "bench", "panel.json"), encoding="utf-8") as _fh:
     PANEL = json.load(_fh)["models"]
-CANONICAL_MODELS = frozenset(m.rstrip("/").split("/")[-1] for m in PANEL)
+CANONICAL_MODELS = frozenset(PANEL)
 
 # A journal with fewer scored rows is a smoke/sanity probe, not a sample —
 # it must never hijack a model's bar via mtime ordering.
@@ -93,7 +93,7 @@ def aggregate(rows):
             newest[m] = mt
     # Stray vendors / typos must never chart — hard canonical whitelist.
     newest = {m: mt for m, mt in newest.items()
-              if short_model(m) in CANONICAL_MODELS}
+              if m in CANONICAL_MODELS}
     stats = []
     for m, mt in newest.items():
         mine = [r for r in rows if r["model"] == m and r["_mtime"] == mt]
