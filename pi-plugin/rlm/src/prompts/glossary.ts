@@ -30,34 +30,21 @@ export function promptCapTokensK(maxPromptChars: number): number {
  * the outcome (§5, Fig. 4a). These cost no tokens and no sub-calls.
  */
 const RETRIEVAL_GLOSSARY_LINES: readonly string[] = Object.freeze([
-  "- `search(query: str, k=10, path_glob=None)`: BM25 ranking over `context` (stemmed, with",
-  "  query expansion — try plain words, not just exact identifiers). Returns",
-  "  [{path, line, end, score, snippet, text}] — POINTERS, not bodies (`text` aliases",
-  "  `snippet`; line..end is the match span; `index_truncated: true` means the context tail",
-  "  is NOT indexed — narrow with path_glob). **Start here.** Free: no sub-LLM call.",
-  "- `grep_context(pattern, k=50, path_glob=None, before=0, after=0) -> dict`: regex over",
-  "  `context`. Returns {hits: [{path, line, text, snippet}], counts, total, truncated} —",
-  "  `counts` is complete even when `hits` is capped, so a wide pattern reports its shape",
-  "  instead of flooding you. Use for exact lexical needles; use `search` for meaning.",
-  "- `outline(path) -> str`: definition/heading skeleton of one file with line numbers.",
-  "  Orient in ~200 chars instead of printing 20K. Matches exact path, then suffix, then glob.",
+  "- `search(query: str, k=10, path_glob=None) -> [{path, line, end, score, snippet, text}]`: free BM25 pointers (`text` aliases `snippet`; `index_truncated: true` ⇒ narrow with `path_glob`). **Start here.**",
+  "- `grep_context(pattern, k=50, path_glob=None, before=0, after=0) -> {hits, counts, total, truncated}`: free regex over `context` (`counts` is complete even when `hits` is capped).",
+  "- `outline(path) -> str`: free definition/heading skeleton with line numbers (~200 chars).",
 ]);
 
 /** v5 delegation doctrine (audit C5): children have NO retrieval tools — their world is the
  *  sliced `context` they were handed. This REPLACES the retrieval lines in child prompts so
  *  the prompt and the runtime sandbox agree (a child taught to `search` burns turns on NameError). */
 const DELEGATION_SURFACE_LINES: readonly string[] = Object.freeze([
-  "- **No `search` / `grep_context` / `outline` / `add_context` in this REPL** (delegation",
-  "  surface, v5 doctrine): your task arrived WITH its world in `context`. Explore it with",
-  "  Python (list comprehensions, string matching, slicing) and delegate slices to sub-LLMs —",
-  "  never re-ask the parent for retrieval.",
+  "- **No `search` / `grep_context` / `outline` / `add_context` in this REPL**: your task arrived WITH its world in `context`; slice it in Python and delegate slices to sub-LLMs.",
 ]);
 
 /** Workstream E: the one new sandbox function (prime-agent rule — surface grows by one). */
 const SKILL_SEARCH_GLOSSARY_LINES: readonly string[] = Object.freeze([
-  "- `skill_search(query, k=8) -> [{id, text, tags, score}]`: BM25 over distilled project facts",
-  "  from PRIOR sessions (SkillState). Free: no sub-LLM call. Use when a config/gotcha/symbol",
-  "  smells like something already learned — do not re-discover it.",
+  "- `skill_search(query, k=8) -> [{id, text, tags, score}]`: free BM25 over prior-session project facts (SkillState).",
 ]);
 
 /** W3 recall discoverability: the condensed NATIVE twins. glossary doctrine — divergence
@@ -111,89 +98,44 @@ export const ROOT_DIGEST_SECTIONS: Readonly<Record<"task" | "findings" | "state"
 
 /** One-line delegation helpers — orchestrating must be cheaper than solving. */
 const DELEGATION_GLOSSARY_LINES: readonly string[] = Object.freeze([
-  "- `map_files(files, prompt) -> Task`: always spawn. `await_task(t)` → dict[path, answer].",
-  "  Accepts context entries or paths; packs into cap-sized batches; splits oversized files.",
-  "  **Default way to read many files** — fire independent `map_files` Tasks, free work, then await.",
-  "- `llm_map_reduce(items, map_prompt, reduce_prompt) -> str`: **blocks** (map then reduce).",
-  "  Prefer separate `map_files` / `llm_batch` Tasks when you can do free work between fan-out and collect.",
+  "- `map_files(files, prompt) -> Task`: spawn; `await_task(t)` → `dict[path, answer]`. Default way to read many files.",
+  "- `llm_map_reduce(items, map_prompt, reduce_prompt) -> str`: **blocks** (map then reduce); prefer `map_files` / `llm_batch` Tasks.",
 ]);
 
 /** Shared glossary entry for the chunked-query helper (headless + native). */
 const CHUNKED_GLOSSARY_LINES: readonly string[] = Object.freeze([
-  "- `llm_query_chunked(text: str, prompt: str) -> Task`: always spawn. `await_task(t)` → list[str]",
-  "  (one answer per chunk, order preserved). Auto-splits text to the sub-LLM prompt cap.",
-  "  Use for ANY text too large for a single `llm_query` — open()ed files, oversized sub-results.",
+  "- `llm_query_chunked(text: str, prompt: str) -> Task`: spawn; `await_task(t)` → `list[str]` (auto-splits oversized text).",
 ]);
 
 /** Non-blocking fan-out: spawn now, collect later (headless glossary). */
 const SPAWN_GLOSSARY_LINES: readonly string[] = Object.freeze([
-  "- **ALWAYS SPAWN (Task + ↗bg):** `llm_query` / `llm_batch` / `rlm_query` / `rlm_batch` /",
-  "  `map_files` / `llm_query_chunked`. Never treat the return as the answer.",
-  "  Collect with `await_task(t)`, `await_task([t1,t2,…])`, or `await_task()` (every still-running Task).",
-  "  If `await_task` returns `Error: sub-call still running`, call it again — do not respawn.",
-  "  `list_tasks()` → [{kind, label, done, var}]. Fire independent Tasks first, free work, then await.",
-  "  Do NOT await after every independent spawn (serializes wall time). `task.done` when settled.",
-  "- `[ledger]` global state: the blackboard in your prompt lists inflight/done agent claims.",
-  "  NEVER `rlm_query` a task already on `[ledger]` (await it / reuse the result); ancestor",
-  "  echo is rejected with a stub. `list_claims()` shows the live table anytime.",
-  "- `spawn(fn, *args) -> Task`: same as calling the always-spawn tools (not `llm_map_reduce`).",
-  "- Only `llm_map_reduce` still blocks until done.",
+  "- **ALWAYS SPAWN (Task + ↗bg):** `llm_query` / `llm_batch` / `rlm_query` / `rlm_batch` / `map_files` / `llm_query_chunked` return a `Task`, never the answer.",
+  "  Collect with `await_task(t)`, `await_task([t1,t2,…])`, or `await_task()` (all running). If `await_task` returns `Error: sub-call still running`, call it again — do not respawn.",
+  "  Fire independent Tasks first, do free work, then `await_task`. `spawn(fn, *args) -> Task` aliases the spawn tools (not `llm_map_reduce`).",
+  "- `[ledger]`: live inflight/done claims (`list_claims()`). Never `rlm_query` a task already on `[ledger]`.",
 ]);
 
-/** v5 (audit C5): the spawn worked example, retrieval flavor — root surface only. */
 const SPAWN_EXAMPLE_RETRIEVAL: readonly string[] = Object.freeze([
-  "",
   "  ```python",
-  "  # Multi-area study: one rlm_batch (parallel workers), free locate, then await",
-  "  t = rlm_batch([",
-  "      \"Study module A — NO edits. Paths + symbols for X.\",",
-  "      \"Study module B — NO edits. Report how Y is configured.\",",
-  "  ])",
-  "  hits = search(\"X OR Y\", k=10)",
+  '  t = rlm_batch(["Study module A — NO edits.", "Study module B — NO edits."])',
+  '  hits = search("X OR Y", k=10)',
   "  reports = await_task(t)",
-  "  # One-shot extracts: map_files / llm_batch also return Task → await_task",
   "  ```",
 ]);
 
-/** v5 (audit C5): the spawn worked example, delegation flavor — no retrieval, slice instead. */
 const SPAWN_EXAMPLE_DELEGATION: readonly string[] = Object.freeze([
-  "",
   "  ```python",
-  "  # Multi-area study: one rlm_batch (parallel workers), slice your world while they run",
-  "  t = rlm_batch([",
-  "      \"Answer from the FIRST half of the context only: paths + symbols for X.\",",
-  "      \"Answer from the SECOND half only: report how Y is configured.\",",
-  "  ])",
-  "  half = [f['path'] for f in context[:len(context)//2]]  # free work while Tasks run",
+  '  t = rlm_batch(["Answer from first half: X.", "Answer from second half: Y."])',
   "  reports = await_task(t)",
-  "  # One-shot extracts: map_files / llm_batch also return Task → await_task",
   "  ```",
 ]);
+
 const RECURSION_CONTEXT_LINES: readonly string[] = Object.freeze([
-  "",
-  "  **What a child sees:** it inherits YOUR `context` — every file you have loaded, including",
-  "  sources under `ctx/<id>/…` — and runs `search` / `grep_context` / `outline` / `map_files`",
-  "  over the same paths. So send instructions, never file bodies: pasting content you already",
-  "  share costs your tokens twice and buys nothing. Your prompt becomes the child's question.",
-  "  Narrow its world with `rlm_query(prompt, paths=['src/auth/', 'ctx/x-9f3a/'])` — path PREFIXES,",
-  "  not globs. Omit `paths` to hand over everything.",
-  "  Inheritance is one-way: sources the child loads, and its whole REPL, die with it — only its",
-  "  final answer string returns. The child cannot write to your `answers` or `plan`.",
-  "  At the depth cap `rlm_query` degrades to a plain sub-LLM call with NO context, which is why",
-  "  this section disappears at the last recursive depth.",
+  "  **Child context:** inherits your `context` (narrow with `paths=['src/auth/']` prefixes; never paste file bodies). One-way: child REPL dies with it; only its answer string returns. Degrades to `llm_query` at depth cap.",
 ]);
 
-/** v5 recursion section, delegation variant (audit C5): describes what a delegation child
- *  receives — the narrowed pack as text, no retrieval of its own. */
 const RECURSION_DELEGATION_LINES: readonly string[] = Object.freeze([
-  "",
-  "  **What a child sees:** it inherits YOUR `context` (narrowed by `paths=` when given) and works",
-  "  on it as text — it has NO retrieval tools, so put what matters in your prompt and `paths`,",
-  "  never file bodies you already share (that costs tokens twice and buys nothing).",
-  "  Inheritance is one-way: sources the child loads, and its whole REPL, die with it — only its",
-  "  final answer string returns. The child cannot write to your `answers` or `plan`.",
-  "  At the depth cap `rlm_query` degrades to a plain sub-LLM call with NO context, which is why",
-  "  this section disappears at the last recursive depth.",
+  "  **Child context:** inherits your `context` (narrowed by `paths=`) as text with NO retrieval tools. One-way: child REPL dies with it; only its answer string returns.",
 ]);
 
 /**
@@ -201,17 +143,11 @@ const RECURSION_DELEGATION_LINES: readonly string[] = Object.freeze([
  * than a repository the run packed for itself.
  */
 const CHILD_CONTEXT_LINES: readonly string[] = Object.freeze([
-  "  You are a sub-RLM. This `context` is your parent's world — every file it has loaded (cwd",
-  "  paths un-prefixed; external sources under `ctx/<id>/…`). Answer only the question above;",
-  "  your REPL and anything you load die with you, and only your final answer string returns.",
+  "  You are a sub-RLM. `context` is your parent's world (`ctx/<id>/…` for external sources). Your REPL dies with you; only your final answer returns.",
 ]);
 
-/** Why a file the user mentioned may be missing from `context`. */
-const CONTEXT_EXCLUSION_NOTE = [
-  "  NOTE: `context` holds only the files you have loaded (starts empty; cwd seeds on first use).",
-  "  Gitignored files and files larger than 1MB of plain text are skipped. Binary documents",
-  "  (PDF, DOCX, XLSX, PPTX, CSV, …) ARE included — converted to Markdown on the way in.",
-].join("\n");
+const CONTEXT_EXCLUSION_NOTE =
+  "  NOTE: `context` starts empty (cwd seeds on first use). Gitignored files and plain text >1MB are skipped; binary docs (PDF/DOCX/XLSX/PPTX/CSV) are converted to Markdown.";
 
 /** Stdout-budget wording — the ONE source for the per-print / per-block elision markers.
  *  core/answer.ts composes these into its segments (head/tail math stays in
@@ -228,15 +164,7 @@ export function stdoutBulkMark(elidedCount: number, capChars: number): string {
 
 /** The large-on-disk-file protocol (headless + native). */
 export const LARGE_FILE_RULE_LINES: readonly string[] = Object.freeze([
-  "**Large on-disk files (profiles, logs, dumps, generated JSON):** files >1MB or gitignored are",
-  "absent from `context`. Protocol:",
-  '1. Load in Python: `raw = open("dhat-heap.json").read()` — loading into a variable is fine.',
-  "2. Deterministic processing in Python (`json.load`, `re`, counting, aggregation) is fine and preferred.",
-  "3. The moment you need MEANING from raw text (summarize, explain, find anomalies), do NOT read it",
-  "   yourself — call `llm_query_chunked(raw, question)` (Task → await_task), or slice + `llm_batch`.",
-  "4. Prints are per-call capped — slice big text in Python and print only the slice you need, or delegate bulk reading (llm_query_chunked).",
-  'Example: `t = llm_query_chunked(raw, "Extract top allocation sites with byte totals"); parts = await_task(t)`, then',
-  "aggregate `parts` in Python or with one final `llm_query` + await_task.",
+  "**Large/gitignored files (>1MB):** `raw = open(p).read()` + Python parsing is fine; for semantic reading use `llm_query_chunked(raw, question)` → `await_task`. Never bulk-print raw text.",
 ]);
 
 /** Concise native-mode glossary line for the chunked helper (native prompt has a 6K budget). */
@@ -264,43 +192,15 @@ export const LARGE_FILE_RULE_NATIVE =
  *  have no `search` and must not be told to locate with it. */
 export function envTips(delegation = false): string {
   const locate = delegation
-    ? "Your job: (1) slice `context` with Python (indexing, string matching, comprehensions),"
-    : "Your job: (1) free locate with `search` / `grep_context` / `outline`,";
-  const probe = delegation
-    ? "1. Probe: `print(len(context))`; locate targets with Python slicing / string matching. Do not print file bodies."
-    : "1. Probe: `print(len(context))`; locate targets with `search` when your surface has it, else\n   Python slicing / string matching. Do not print file bodies.";
+    ? "1. Locate: slice `context` in Python (`print(len(context))`). Do not print file bodies."
+    : "1. Locate: `print(len(context))`; use free `search` / `grep_context` / `outline` (or Python slicing). Do not print file bodies.";
   return [
     "## Decomposition doctrine",
-    "",
-    "**Orchestrate; don't solve.** A single chain of thought over a large repository drifts —",
-    "you lose partials and compound mistakes. Sub-workers are competent: trust them; don't read for them.",
-    "",
+    "Orchestrate; don't brute-force. Leaf workers (`llm_query`/`llm_batch`) are fast non-thinking readers: use them to extract/screen slices, then audit borderline judgements yourself (`rlm_query` when a sub-area needs its own reasoning loop).",
     locate,
-    "(2) fan out: **multi-step areas → `rlm_batch` / `rlm_query`**; one-shot extracts →",
-    "  `map_files` / `llm_batch` (all return Task — `await_task` for content),",
-    "(3) memoize into `answers`, (4) sanity-check before dependents, (5) assemble from `answers`.",
-    "Your own compute is: pointers, dict lookups, string formatting, and decisions.",
-    "",
-    "### The only state that matters",
-    "`answers` and `plan` are dicts that persist across every turn.",
-    "**If a result isn't in `answers`, you have not memoized it.** Task handles are REPL vars —",
-    "`list_tasks()` / `SHOW_VARS()` find them. Do not trust truncated stdout. Memoize after await_task.",
-    "",
-    "### Shape of a run",
-    probe,
-    "2. Plan: sub-questions into `plan` (each from a named slice / module).",
-    "3. Fan out **in parallel**: one `rlm_batch` for independent multi-step studies, or",
-    "   `map_files` / `llm_batch` for one-shot reads — not one serial call per file.",
-    "4. Assemble from `answers`.",
-    "",
-    "### Red flags — you are off track",
-    "- Printing file bodies / native bulk read → stop; use map_files or rlm_*.",
-    "- `llm_query(\"Read src/foo.ts…\")` with only a path — sub-LLM has **no disk**; use map_files/rlm_*.",
-    "- Multi-module task with zero `rlm_batch`/`rlm_query`/`map_files` → under-delegating.",
-    "- Await after every independent spawn → serializes wall time; fire-all-then-await.",
-    "- Treating Task as the answer without `await_task`.",
-    "- Regex used to *infer meaning* → sub-LLM job. Regex is for exact needles only.",
-    "- Two turns with zero sub-LLM calls on analysis → solving it yourself.",
+    "2. Fan out in parallel: multi-step areas → `rlm_batch` / `rlm_query`; one-shot extracts → `map_files` / `llm_batch` → `await_task`.",
+    "3. Memoize into `answers` (`plan` for sub-questions), audit borderline items yourself, then assemble from `answers`.",
+    "Red flags: bulk file prints; `llm_query` with path-only (no disk!); awaiting after each spawn instead of batching; treating `Task` as the answer; trusting unreviewed `llm_query` counts on subtle criteria.",
   ].join("\n");
 }
 
@@ -339,58 +239,26 @@ export function replGlossary(
   const lines = ["Available in the REPL:"];
   if (kind === "text") {
     lines.push(
-      "- `context`: str — the raw text you must analyze. Probe it with slices",
-      "  (`print(context[:2000])`), split it programmatically, and delegate large chunks",
-      "  to sub-LLMs — never dump the whole string into your own output.",
+      "- `context`: str — raw text to analyze. Probe slices (`print(context[:1000])`), split in Python, and delegate large chunks.",
     );
   } else {
     lines.push(
-      "- `context`: list[dict] — the files you have loaded (starts empty; cwd seeds on first use).",
-      "  Each dict has keys: `path` (str), `content` (str), `tokens` (int).",
-      "  Cwd paths are un-prefixed (real paths for edit/write); external sources land under",
-      "  `ctx/<source_id>/…`. " + CTX_VIRTUAL_PATH_NOTE,
-      "  For large sets, chunk and delegate — never dump raw file bodies.",
+      "- `context`: `list[dict]` (`path`, `content`, `tokens`). " + CTX_VIRTUAL_PATH_NOTE,
       CONTEXT_EXCLUSION_NOTE,
     );
     if (child) lines.push(...CHILD_CONTEXT_LINES);
-    if (delegation) {
+    if (!delegation) {
       lines.push(
-        "",
-        "  Worked example — slice the world you were handed, then delegate it (Task + await):",
         "  ```python",
-        "  slice = [f for f in context if f['path'].startswith('src/auth/')][:6]",
-        "  prompts = [f\"Answer from this file only.\\n\\n{f['content'][:4000]}\" for f in slice]",
-        "  t = llm_batch(prompts)",
-        "  answers.update(dict(zip([f['path'] for f in slice], await_task(t))))",
-        "  ```",
-      );
-    } else {
-      lines.push(
-        "",
-        "  Worked example — find the slice, then delegate it (Task + await):",
-        "  ```python",
-        '  hits = search("where is the retry/backoff policy configured?", k=8)',
-        "  paths = sorted({h['path'] for h in hits})",
-        '  t = map_files(paths, "Describe any retry/backoff policy in this file, with line numbers. Say NONE if absent.")',
-        "  answers.update(await_task(t))",
-        "  print({p: a[:80] for p, a in answers.items()})",
+        '  hits = search("retry backoff", k=8)',
+        '  answers.update(await_task(map_files(sorted({h["path"] for h in hits}), "Retry policy + lines; NONE if absent.")))',
         "  ```",
       );
     }
   }
-  if (delegation) {
-    lines.push(...DELEGATION_SURFACE_LINES);
-  } else {
-    lines.push(...RETRIEVAL_GLOSSARY_LINES);
-  }
+  lines.push(...(delegation ? DELEGATION_SURFACE_LINES : RETRIEVAL_GLOSSARY_LINES));
   lines.push(
-    "- `llm_query(prompt: str) -> Task`: spawn one sub-LLM (await_task for str). The prompt must",
-    "  **contain the text** to analyze — this call has no filesystem and no `context`.",
-    "  Leaf convention: a sub-LLM answers exactly `NOT_FOUND` when its slice lacks the answer —",
-    "  treat that as \"not in this slice\": slice differently, search elsewhere, or narrow the ask.",
-    "  Never re-send an identical prompt hoping for a different verdict.",
-    "- `llm_batch(prompts: list[str]) -> Task`: many parallel one-shots (same rule: embed text).",
-    "  await_task → ordered list[str]. NEVER pass bare file paths as if the worker can open them.",
+    "- `llm_query(prompt: str) -> Task` / `llm_batch(prompts: list[str]) -> Task`: non-thinking leaf extractors (`await_task` → `str` / `list[str]`). Embed the text in the prompt (no disk, no `context`). Replies `NOT_FOUND` when absent.",
     ...CHUNKED_GLOSSARY_LINES,
     ...SPAWN_GLOSSARY_LINES,
     ...SKILL_SEARCH_GLOSSARY_LINES,
@@ -399,50 +267,18 @@ export function replGlossary(
   );
   if (contextLoader && !delegation) {
     lines.push(
-      "- `add_context(source: str) -> dict`: load a dir, file, document, or git URL and **APPEND its",
-      "  files into `context`** (same shape: path/content/tokens). Documents (PDF, DOCX, XLSX, PPTX,",
-      "  CSV, …) are converted to Markdown automatically and cached until the source file changes.",
-      "  Paths are namespaced under `ctx/<source_id>/…` so you can filter by prefix. Returns metadata:",
-      "  {\"source\", \"source_id\", \"path_prefix\", \"files\", \"chars\", \"context_len\", \"already_loaded\",",
-      "  \"documents\", \"converted\", \"skipped\"} or an \"Error: ...\" string. `documents` is how many",
-      "  document-type files landed (incl. cache hits); `converted` is how many were freshly converted",
-      "  this call. **Never treat the return value as the file list** — always search and chunk the",
-      "  single variable `context`. Idempotent: re-loading the same source is a no-op.",
-      "",
-      "  ```python",
-      '  info = add_context("/path/to/other-project")',
-      "  # info is metadata; files are already in context under info[\"path_prefix\"]",
-      '  lib_files = [f for f in context if f["path"].startswith(info["path_prefix"])]',
-      "  ```",
+      "- `add_context(source: str) -> dict`: APPEND a dir, file, doc, or git URL into `context` under `ctx/<source_id>/…` (idempotent; returns metadata `{source, source_id, path_prefix, files, chars, context_len, already_loaded, documents, converted, skipped}`).",
     );
   }
   if (recursion) {
     lines.push(
-      "- `rlm_query(task|prompt, paths=None) -> Task` / `rlm_batch(tasks|prompts, paths=None) -> Task`:",
-      "  always spawn + ↯bg. await_task for the report string(s). Child REPL is private.",
-      "  Both spellings accepted; prefer `task`/`tasks`.",
-      "",
-      "  **Routing (api_v5):**",
-      "  - `llm_query` / `llm_batch` / `map_files` — one-shot facts/extracts (fast).",
-      delegation
-        ? "  - `rlm_query` — one multi-step study (its own delegation loop; it cannot search either)."
-        : "  - `rlm_query` — one multi-step study (own search/outline loop).",
-      "  - `rlm_batch` — ≥2 independent multi-step studies in **parallel** (prefer over N× rlm_query).",
-      "  Always Task → await_task. Fire independent work first; never serial-await between peers.",
+      "- `rlm_query(task|prompt, paths=None) -> Task` / `rlm_batch(tasks|prompts, paths=None) -> Task`: spawn thinking sub-RLM(s) (`await_task` → report str(s)).",
       ...(delegation ? RECURSION_DELEGATION_LINES : RECURSION_CONTEXT_LINES),
     );
   }
   lines.push(
-    "- `answers` / `plan`: two dicts that persist across turns. Memoize every",
-    "  verified result in `answers` — see the decomposition doctrine below.",
-    "- `SHOW_VARS() -> str`: list every variable currently in the REPL (Task handles show as `<Task …>`).",
-    "- `list_tasks()`: every Task this REPL created — [{kind, label, done, var}].",
-    "- `list_claims()`: the live `[ledger]` table of inflight/done agent work.",
-    '- `answer`: a dict initialized to {"content": "", "ready": False}. To submit your final answer,',
-    '  set `answer["content"]` to the answer text and `answer["ready"] = True`.',
-    '  **You MUST flip `answer["ready"] = True` — runs that never finalize are discarded.**',
-    '  Never write FINAL(...) / FINAL_VAR(...) prose and never emit a ```state fence in the',
-    '  reply that finalizes — `answer` is the only finalize channel; Σ bookkeeping waits.',
+    "- `answers` / `plan`: persistent dicts across turns (`SHOW_VARS()`, `list_tasks()`, `list_claims()`).",
+    '- `answer`: `{"content": "", "ready": False}`. Submit by setting `answer["content"]` and `answer["ready"] = True` (never `FINAL(...)` prose or a ```state fence on the finalizing turn).',
   );
   return lines.join("\n");
 }

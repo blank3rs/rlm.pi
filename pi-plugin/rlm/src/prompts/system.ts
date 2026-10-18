@@ -45,29 +45,11 @@ interface SystemPromptOptions {
 
 function orchestratorAddendum(maxPromptChars: number, delegation: boolean): string {
   return [
-    "As an RLM you are an **orchestrator, not a solver**. Probe `context`, plan decomposition, then",
-    "fan out — do not solve multi-step module work yourself in a long chain of thought.",
-    "",
-    "<contract> llm_query / llm_batch / map_files / rlm_query / rlm_batch return Task (not the answer).",
-    delegation
-      ? "Only await_task returns content. Fire independent Tasks first, slice your `context` meanwhile, then await_task."
-      : "Only await_task returns content. Fire independent Tasks first, free search, then await_task.",
-    "Do not await after every independent spawn.</contract>",
-    "",
-    "<routing> one-shot facts → llm_query/llm_batch/map_files; one multi-step study → rlm_query;",
-    "≥2 independent multi-step areas → rlm_batch (prefer over serial rlm_query). NEVER print file",
-    "bodies into your own stream when a Task tool can read them.</routing>",
-    "",
-    "Your own context window is small. Push long-context work into sub-calls.",
-    delegation
-      ? "If a slice of your `context` already pins a tiny fact, quote it — do not re-ask."
-      : "If free search/grep already pins a tiny fact, use that. Aggregate small results in Python / `answers`.",
-    "",
-    `Sub-call budget: (1) per-prompt < ${maxPromptChars.toLocaleString()} chars (≈${promptCapTokensK(maxPromptChars)}K tok);`,
-    "(2) ~20 prompts per llm_batch. Fat prompts in small batches beat thousands of tiny prompts.",
-    "Filter in Python first when both axes overflow; for semantic classification/counting over unstructured items, classify chunks with `llm_batch` and aggregate exact counts in Python.",
-    "",
-    "Reserve your tokens for planning, combining, and finalizing. Do not finalize before inspecting `context`.",
+    "As an RLM you are an **orchestrator, not a solver**. Probe `context`, plan decomposition, then fan out.",
+    `<contract> Heavy calls return Task; only await_task returns content. Fire independent Tasks first, ${delegation ? "slice `context`" : "free search"}, then await_task.</contract>`,
+    "<routing> one-shot extracts → llm_query/llm_batch/map_files; multi-step study → rlm_query; ≥2 areas → rlm_batch. Never print raw file bodies.</routing>",
+    `Budget: < ${maxPromptChars.toLocaleString()} chars (≈${promptCapTokensK(maxPromptChars)}K tok) per prompt; ~20 prompts/llm_batch.`,
+    "`llm_query`/`llm_batch` are non-thinking readers: spell out strict criteria in their prompt (e.g., for literal-paraphrase checks: must restate the figurative meaning literally and non-metaphorically, not swap another metaphor or twist a word) and ask for `index | label | 5-word reason`; for exact counts, print and audit the minority/borderline items yourself before counting.",
   ].join("\n");
 }
 
@@ -98,10 +80,7 @@ export function buildRlmSystemPrompt(meta: PromptMeta, opts: SystemPromptOptions
     if (opts.delegation ?? false) {
       parts.push(
         "",
-        "**REPL API (ONLY these):** llm_query / llm_batch / llm_query_chunked / map_files /",
-        "llm_map_reduce / rlm_query / rlm_batch / spawn / await_task / list_tasks /",
-        "list_claims. There is no search/grep_context/outline here — your task arrived WITH its",
-        "world in `context`; slice it into llm prompts. rlm_query only for a disjoint path set.",
+        "**REPL API (delegation surface):** no `search`/`grep_context`/`outline` — slice `context` in Python and delegate slices.",
       );
     }
   }
@@ -113,11 +92,7 @@ export function buildRlmSystemPrompt(meta: PromptMeta, opts: SystemPromptOptions
       kind, recursion, opts.contextLoader ?? false, opts.child ?? false, opts.delegation ?? false,
     ),
     "",
-    `Each print() passes through verbatim up to ${stdoutCap} characters — one print never steals from another. ` +
-    "A single print over the cap keeps head+tail plus an elision note; a block that dumps far more keeps its first and last prints and collapses the middle. " +
-    "Full output persists in REPL variables (call SHOW_VARS()); re-print the slice you need, e.g. print(big_var[a:b]).",
-    "",
-    "Start by probing `context` (print a few lines, count items). Then build up an answer to the query.",
+    `Per-print stdout cap: ${stdoutCap} chars (over-cap keeps head+tail; full values stay in REPL vars — \`SHOW_VARS()\`, \`print(v[a:b])\`).`,
   );
   if (opts.orchestrator ?? true) {
     // Two counterweights, both required (paper App. B): the addendum bounds OVER-recursion

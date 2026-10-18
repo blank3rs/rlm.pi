@@ -187,8 +187,8 @@ export function makeRun(target: BenchTarget, apiKey: string, opts?: BenchRunOpts
   const config: RlmConfig = {
     ...DEFAULT_CONFIG,
     maxIterations: opts?.maxIterations ?? BENCH_MAX_ITERATIONS,
-    maxConcurrentSubcalls: target.provider === "zai" ? 1 : DEFAULT_CONFIG.maxConcurrentSubcalls,
-    maxConcurrentChildren: target.provider === "zai" ? 1 : DEFAULT_CONFIG.maxConcurrentChildren,
+    maxConcurrentSubcalls: target.provider === "zai" ? 30 : DEFAULT_CONFIG.maxConcurrentSubcalls,
+    maxConcurrentChildren: target.provider === "zai" ? 30 : DEFAULT_CONFIG.maxConcurrentChildren,
     // Free-pool upstreams flake (transient "finish_reason: error"); a bench row should mean
     // "the model failed the task", not "the pool hiccuped" — so retry harder than interactive.
     retryMaxAttempts: 5,
