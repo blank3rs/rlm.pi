@@ -17,6 +17,7 @@ import { buildTasks } from "./tasks.ts";
 
 const args = process.argv.slice(2);
 const ext = args.includes("--ext");
+const full24 = args.includes("--full24");
 const REASONING_LEVELS = Object.freeze(["minimal", "low", "medium", "high", "xhigh", "max"] as const);
 type Reasoning = (typeof REASONING_LEVELS)[number];
 const reasoningFlag = args.indexOf("--reasoning");
@@ -31,13 +32,14 @@ if (modelRef === undefined || taskId === undefined) {
   throw new Error("usage: bun run bench/debug-task.ts <model-ref> <taskId> [--ext] [--reasoning <level>]");
 }
 
-const opts = ext ? { oolongMaxCl: 8192, oolongLimit: 6 } : {};
+const opts = full24 ? { oolongMaxCl: 65536, oolongLimit: 24 } : ext ? { oolongMaxCl: 8192, oolongLimit: 6 } : {};
 const tasks = await buildTasks("oolong", undefined, opts);
 const task = tasks.find((t) => t.id === taskId);
 if (task === undefined) throw new Error(`no task ${taskId}; have: ${tasks.map((t) => t.id).join(", ")}`);
 
 // Recipe parity: pass --reasoning to mirror the bench run being dissected (ab6 used high).
-const run = makeRun(resolveTarget(modelRef), requireApiKey(), {
+const target = resolveTarget(modelRef);
+const run = makeRun(target, requireApiKey(target.provider), {
   temperature: 0,
   ...(reasoning !== undefined ? { reasoning } : {}),
 });
