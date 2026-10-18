@@ -305,7 +305,8 @@ export function rectify(args: {
 }): RectifyAction {
   const paths = topPathsFromState(args.state);
   if (paths.length >= 2) return { kind: "narrow-paths", paths };
-  if (args.config.maxConcurrentSubcalls >= 4) {
+  // Unlimited admission has nothing to halve — an Infinity limit would make the arm a no-op.
+  if (Number.isFinite(args.config.maxConcurrentSubcalls) && args.config.maxConcurrentSubcalls >= 4) {
     return {
       kind: "reduce-concurrency",
       maxConcurrentSubcalls: Math.max(1, Math.floor(args.config.maxConcurrentSubcalls / 2)),

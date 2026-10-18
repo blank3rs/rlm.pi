@@ -28,10 +28,10 @@ export interface RlmConfig {
   readonly execTimeoutS: number;
   /** Parent-side watchdog per sandbox request (ms). Hang backstop (see execTimeoutS). */
   readonly requestTimeoutMs: number;
-  /** Concurrency pool for *_batched sub-calls. */
+  /** Concurrency pool for *_batched sub-calls. `Infinity` = unlimited (default). */
   readonly maxConcurrentSubcalls: number;
-  /** Concurrent recursive child engines admitted per depth. Lower than maxConcurrentSubcalls:
-   *  each child is a Python subprocess holding its own copy of the inherited context. */
+  /** Concurrent recursive child engines admitted per depth; each child is a Python subprocess
+   *  holding its own copy of the inherited context. `Infinity` = unlimited (default). */
   readonly maxConcurrentChildren: number;
   /** v5.1 rate-limit resilience (see util/retry.ts): transient 429/5xx are retried with
    *  backoff, and rate limits additionally cool a shared per-provider throttle.

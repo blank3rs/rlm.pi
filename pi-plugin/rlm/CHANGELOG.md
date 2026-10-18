@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Concurrency is unlimited by default.** `maxConcurrentSubcalls` (leaf `llm_query` /
+  `llm_batch`) and `maxConcurrentChildren` (`rlm_query` child engines per depth) now default
+  to `Infinity` instead of 8 and 4. The provider is the real limiter: a 429 parks on the
+  shared cooldown throttle instead of queueing behind a semaphore. Both stay cappable per
+  provider (`providerMaxConcurrent`) and per run (`/rlm-config` → `unlimited` or a finite
+  value; hand-edited `rlm.json`). `rectify()` no longer offers its `reduce-concurrency` arm
+  when admission is unlimited — halving `Infinity` was a no-op.
+
 ## [0.3.28] — 2026-10-07
 
 ### Added

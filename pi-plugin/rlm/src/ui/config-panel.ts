@@ -13,8 +13,8 @@ const CHOICES = Object.freeze({
   maxDepth: Object.freeze(["1", "2", "3", "4"]),
   maxIterations: Object.freeze(["100", "200", "500", "1000"]),
   execTimeoutS: Object.freeze(["30", "60", "120", "300"]),
-  maxConcurrentSubcalls: Object.freeze(["2", "4", "8", "16", "32"]),
-  maxConcurrentChildren: Object.freeze(["1", "2", "3", "4", "6", "8"]),
+  maxConcurrentSubcalls: Object.freeze(["unlimited", "2", "4", "8", "16", "32"]),
+  maxConcurrentChildren: Object.freeze(["unlimited", "1", "2", "3", "4", "6", "8"]),
   maxTimeoutMs: Object.freeze(["none", "60", "120", "300"]),
   maxTokens: Object.freeze(["none", "10000", "50000", "100000"]),
   maxErrors: Object.freeze(["3", "5", "10", "none"]),
@@ -49,8 +49,8 @@ export async function showConfigPanel(ctx: ExtensionContext, config: RlmConfig):
     item("maxDepth", String(config.maxDepth), CHOICES.maxDepth),
     item("maxIterations", String(config.maxIterations), CHOICES.maxIterations),
     item("execTimeoutS", String(config.execTimeoutS), CHOICES.execTimeoutS),
-    item("maxConcurrentSubcalls", String(config.maxConcurrentSubcalls), CHOICES.maxConcurrentSubcalls),
-    item("maxConcurrentChildren", String(config.maxConcurrentChildren), CHOICES.maxConcurrentChildren),
+    item("maxConcurrentSubcalls", concurrencyValue(config.maxConcurrentSubcalls), CHOICES.maxConcurrentSubcalls),
+    item("maxConcurrentChildren", concurrencyValue(config.maxConcurrentChildren), CHOICES.maxConcurrentChildren),
     item("maxTimeoutMs", config.maxTimeoutMs != null ? String(Math.round(config.maxTimeoutMs / 60_000)) : "none", CHOICES.maxTimeoutMs),
     item("maxTokens", config.maxTokens != null ? String(config.maxTokens) : "none", CHOICES.maxTokens),
     item("maxErrors", config.maxErrors != null ? String(config.maxErrors) : "none", CHOICES.maxErrors),
@@ -100,6 +100,15 @@ export async function showConfigPanel(ctx: ExtensionContext, config: RlmConfig):
   return edited;
 }
 
+/** Concurrency limits: `Infinity` renders as the panel's "unlimited" sentinel. */
+function concurrencyValue(limit: number): string {
+  return Number.isFinite(limit) ? String(limit) : "unlimited";
+}
+
+function parseConcurrency(value: string): number {
+  return value === "unlimited" ? Number.POSITIVE_INFINITY : Number(value);
+}
+
 /** Optional numeric field: the literal "none" clears it. */
 function optionalNumber(value: string, scale = 1): number | undefined {
   return value === "none" ? undefined : Number(value) * scale;
@@ -118,8 +127,8 @@ export function applySetting(config: RlmConfig, id: string, value: string): RlmC
     case "maxDepth": return Object.freeze({ ...config, maxDepth: Number(value) });
     case "maxIterations": return Object.freeze({ ...config, maxIterations: Number(value) });
     case "execTimeoutS": return Object.freeze({ ...config, execTimeoutS: Number(value) });
-    case "maxConcurrentSubcalls": return Object.freeze({ ...config, maxConcurrentSubcalls: Number(value) });
-    case "maxConcurrentChildren": return Object.freeze({ ...config, maxConcurrentChildren: Number(value) });
+    case "maxConcurrentSubcalls": return Object.freeze({ ...config, maxConcurrentSubcalls: parseConcurrency(value) });
+    case "maxConcurrentChildren": return Object.freeze({ ...config, maxConcurrentChildren: parseConcurrency(value) });
     case "maxTimeoutMs": return Object.freeze({ ...config, maxTimeoutMs: optionalNumber(value, 60_000) });
     case "maxTokens": return Object.freeze({ ...config, maxTokens: optionalNumber(value) });
     case "maxErrors": return Object.freeze({ ...config, maxErrors: optionalNumber(value) });

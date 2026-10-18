@@ -65,5 +65,5 @@ bounded and that needle facts stay reachable through `ctx/session-log/*`.
 
 `makeRun()` builds the engine like the test fixtures in `pi-plugin/rlm/test/helpers.ts`,
 but with a real provider. Main settings: `maxIterations 200`, `autoSeedCwd false`,
-`enableTokenBudget false`, 5 retries and 30 rate-limit retries. On `zai`, concurrency is 30
-and retry delays are longer.
+`enableTokenBudget false`, unlimited sub-call/child concurrency and 5 retries. On `zai`,
+retry delays are longer.

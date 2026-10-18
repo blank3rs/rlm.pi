@@ -134,7 +134,7 @@ V(ΔΣ_t, Σ_t)                 deterministic validator — no crash paths
 | Max recursion depth | `4`                | Deeper trees for harder problems            |
 | Max iterations      | `30`               | Longer runs for complex tasks               |
 | REPL timeout        | `120`s             | Bump for slow computations                  |
-| Max concurrent subs | `16`               | More parallelism (costs RAM)                |
+| Max concurrent subs | `unlimited`        | Cap parallelism (saves RAM, respects rate limits) |
 
 ## Sampling & reproducibility
 

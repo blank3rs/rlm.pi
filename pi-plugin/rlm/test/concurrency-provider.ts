@@ -18,7 +18,11 @@ import { DEFAULT_CONFIG } from "../src/config/defaults.ts";
 // ── gate math ───────────────────────────────────────────────────────────────────
 
 {
-  const base = { ...DEFAULT_CONFIG };
+  check("defaults: leaf and child admission are unlimited",
+    !Number.isFinite(DEFAULT_CONFIG.maxConcurrentSubcalls) && !Number.isFinite(DEFAULT_CONFIG.maxConcurrentChildren));
+
+  // Finite base: the "caps only ever LOWER" contract needs a ceiling to lower.
+  const base = { ...DEFAULT_CONFIG, maxConcurrentSubcalls: 8, maxConcurrentChildren: 4 };
   check("leaf: no caps → base limit", effectiveSubcallLimit(base, ["openai"]) === base.maxConcurrentSubcalls);
 
   const zai = { ...DEFAULT_CONFIG, providerMaxConcurrent: Object.freeze({ zai: 4 }) };
@@ -28,14 +32,14 @@ import { DEFAULT_CONFIG } from "../src/config/defaults.ts";
     effectiveSubcallLimit(zai, ["openai", "zai"]) === 4);
   check("leaf: unknown providers ignored", effectiveSubcallLimit(zai, ["mystery"]) === DEFAULT_CONFIG.maxConcurrentSubcalls);
 
-  const tighter = { ...DEFAULT_CONFIG, providerMaxConcurrent: Object.freeze({ zai: 64 }) };
+  const tighter = { ...base, providerMaxConcurrent: Object.freeze({ zai: 64 }) };
   check("leaf: a cap above the base never RAISES the limit",
-    effectiveSubcallLimit(tighter, ["zai"]) === DEFAULT_CONFIG.maxConcurrentSubcalls);
+    effectiveSubcallLimit(tighter, ["zai"]) === base.maxConcurrentSubcalls);
 
   check("child: provider cap lowers child gate", effectiveChildLimit(zai, "zai") === 4);
   check("child: other provider keeps base", effectiveChildLimit(zai, "openai") === DEFAULT_CONFIG.maxConcurrentChildren);
-  check("child: cap above base keeps base", effectiveChildLimit(tighter, "zai") === DEFAULT_CONFIG.maxConcurrentChildren);
-  check("child: no caps → base", effectiveChildLimit(base, "zai") === DEFAULT_CONFIG.maxConcurrentChildren);
+  check("child: cap above base keeps base", effectiveChildLimit(tighter, "zai") === base.maxConcurrentChildren);
+  check("child: no caps → base", effectiveChildLimit(base, "zai") === base.maxConcurrentChildren);
 }
 
 // ── settings validation ─────────────────────────────────────────────────────────
@@ -68,6 +72,13 @@ import { DEFAULT_CONFIG } from "../src/config/defaults.ts";
   };
   await Promise.all(new Array(8).fill(0).map(() => sem.run(job)));
   check("semaphore: provider-capped gate bounds concurrency at 4", peak === 4, `peak=${peak}`);
+
+  // Unlimited admission (the default) must never park a caller.
+  const open = new Semaphore(effectiveSubcallLimit(DEFAULT_CONFIG, ["openai"]));
+  active = 0;
+  peak = 0;
+  await Promise.all(new Array(8).fill(0).map(() => open.run(job)));
+  check("semaphore: unlimited gate admits every pending job", peak === 8, `peak=${peak}`);
 
   // DepthGates: per-depth independence still holds with the capped child limit.
   const gates = new DepthGates(effectiveChildLimit(

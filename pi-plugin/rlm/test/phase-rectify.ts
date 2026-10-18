@@ -44,8 +44,11 @@ function commit(state: RunState, patchKey: Record<string, unknown>): RunState {
     rectify({ state: onePath, config: cfg() }).kind !== "narrow-paths",
   );
 
-  const noPaths = rectify({ state: undefined, config: cfg() });
+  const noPaths = rectify({ state: undefined, config: cfg({ maxConcurrentSubcalls: 8 }) });
   check("arm 2: reduce-concurrency", noPaths.kind === "reduce-concurrency" && noPaths.maxConcurrentSubcalls === 4);
+
+  const unlimited = rectify({ state: undefined, config: cfg() });
+  check("unlimited admission has nothing to halve", unlimited.kind === "none");
 
   const nothing = rectify({ state: undefined, config: cfg({ maxConcurrentSubcalls: 2 }) });
   check("arm 3: none", nothing.kind === "none");

@@ -131,16 +131,16 @@ rm -rf ~/.pi/agent/extensions/rlm
 | Budget ceiling | none | 当美元支出超过此值时停止整个树 |
 | Max consecutive errors | `5` | 在 N 轮连续错误后停止 |
 | REPL block timeout | `120s` | 每个 `repl` 块的墙上时钟时间 (worker 中的 SIGALRM) |
-| Max concurrent sub-calls | `4` | `*_batched` 的池大小 |
+| Max concurrent sub-calls | `unlimited` | `*_batched` 的池大小 |
 | Orchestrator addendum | on | “委派，而非自行解决”的引导 |
 | Trajectory compaction | on (0.85) | 当历史记录接近上下文窗口时进行总结 |
 | `yolo` | off | 立即应用建议的修改，跳过审核弹出窗 |
 | `askUserQuestion` | on | 向模型公开 `ask_user_question()` |
 
 > **并发注意：** 每个 `rlm_query` 子节点都会启动自己的 `python3` worker (冷启动约 50–150 毫秒)。
-> 最坏情况下的并发解释器数量 ≈ `maxConcurrentSubcalls`^(depth−1)；在
-> 默认设置下 (深度 4, 并发 4)，极端情况下为 4³ = 64。预算和错误
-> 上限 (见上文) 无论扇出 (fan-out) 如何都会限制总支出。
+> 默认并发不设上限 (`unlimited`) —— 真正的限制来自服务商，429 会停进共享的冷却节流器。
+> 若显式设置 `maxConcurrentChildren`，最坏情况下的并发解释器数量 ≈ `(depth − 1) × 上限`。
+> 预算和错误上限 (见上文) 无论扇出多大都会限制总支出。
 
 ## 采样与可复现性
 

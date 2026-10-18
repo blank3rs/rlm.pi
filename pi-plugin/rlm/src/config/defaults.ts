@@ -27,14 +27,13 @@ export const DEFAULT_CONFIG: Readonly<RlmConfig> = Object.freeze({
   maxIterations: 1_000,
   execTimeoutS: 120,
   requestTimeoutMs: 15 * 60_000,
-  // Session-wide, not per-batch: spawn() puts many requests on the wire at once, so this is
-  // the only thing bounding leaf fan-out. Default 8 — a sane rate for per-account limits
-  // (raise to 16/32 via /rlm-config when the provider allows).
-  maxConcurrentSubcalls: 8,
-  // Children are bounded separately and lower: each is a Python subprocess holding its own copy
-  // of the context it inherited, where a leaf is one HTTP request. Worst case is
-  // (maxDepth - 1) × this many concurrent child engines. Default 4.
-  maxConcurrentChildren: 4,
+  // Session-wide, not per-batch: spawn() puts many requests on the wire at once. Unlimited by
+  // default — the provider is the real limiter (rate limits park on the throttle instead of
+  // queueing here); set a finite number in /rlm-config or rlm.json to cap leaf fan-out.
+  maxConcurrentSubcalls: Number.POSITIVE_INFINITY,
+  // Children are bounded separately: each is a Python subprocess holding its own copy of the
+  // context it inherited, where a leaf is one HTTP request. Also unlimited by default.
+  maxConcurrentChildren: Number.POSITIVE_INFINITY,
   // v5.1 rate-limit resilience (util/retry.ts): 15 total attempts on the SAME model —
   // 500ms→15s backoff, 2s→60s adaptive per-provider cooldown. DOCTRINE: NO fallback —
   // when the attempts are exhausted the call fails loudly; model/provider never switch.
