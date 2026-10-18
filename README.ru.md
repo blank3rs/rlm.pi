@@ -12,8 +12,9 @@
 <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT" />
 </p>
 
-<sub><a href="README.md">English</a> · <a href="README.zh-CN.md">中文</a> · <b>Русский</b></sub>
+<img src="https://github.com/openzebra/rlm.pi/blob/master/assets/hero.png" width="92%" alt="rlm.pi — OOLONG benchmark results" />
 
+<sub><a href="README.md">English</a> · <a href="README.zh-CN.md">中文</a> · <b>Русский</b></sub>
 </div>
 
 ## Установка

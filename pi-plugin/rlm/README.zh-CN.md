@@ -26,8 +26,11 @@ pi uninstall npm:@hicaru/pi-rlm
 
 然后在 Pi 中运行 `/reload` —— `/rlm`、`/rlm-config` 和 `/rlm-stop` 会出现在 **[Extensions]** 下。使用 `Ctrl+Shift+R` 或 `/rlm` 切换。
 
-## 什么是 pi-rlm？
+<p align="center">
+  <img src="https://github.com/openzebra/rlm.pi/blob/master/assets/hero.png" width="100%" alt="rlm.pi — OOLONG benchmark results">
+</p>
 
+## 什么是 pi-rlm？
 一个把 Pi 会话变成**递归语言模型 (RLM)** 的插件：不必把庞大的文档塞进提示词，上下文
 驻留在 Python REPL 中，由你最好的模型编排 —— 检索、分解，并把叶子读取递归地委派给
 廉价的工作模型。同一个 Pi 会话、同样的工具、同样的密钥 —— 打开 `/rlm` 即可。

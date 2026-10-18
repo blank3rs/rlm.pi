@@ -12,8 +12,9 @@ Use a cheap model to read very large contexts with high accuracy.
 <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT" />
 </p>
 
-<sub><b>English</b> · <a href="README.zh-CN.md">中文</a> · <a href="README.ru.md">Русский</a></sub>
+<img src="https://github.com/openzebra/rlm.pi/blob/master/assets/hero.png" width="92%" alt="rlm.pi — OOLONG benchmark results" />
 
+<sub><b>English</b> · <a href="README.zh-CN.md">中文</a> · <a href="README.ru.md">Русский</a></sub>
 </div>
 
 ## Install

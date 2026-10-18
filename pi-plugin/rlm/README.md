@@ -29,8 +29,11 @@ Then `/reload` (or restart) — `/rlm`, `/rlm-config`, `/rlm-stop` appear under
 | **Pi**       | `pi install npm:@hicaru/pi-rlm`     | `pi install npm:@hicaru/pi-rlm --force`     | `pi uninstall npm:@hicaru/pi-rlm`     |
 | **oh-my-pi** | `omp plugin install @hicaru/pi-rlm` | `omp plugin install @hicaru/pi-rlm --force` | `omp plugin uninstall @hicaru/pi-rlm` |
 
-## What is pi-rlm?
+<p align="center">
+  <img src="https://github.com/openzebra/rlm.pi/blob/master/assets/hero.png" width="100%" alt="rlm.pi — OOLONG benchmark results">
+</p>
 
+## What is pi-rlm?
 A Pi plugin that turns your session into a **Recursive Language Model (RLM)**: instead of
 stuffing a huge document into the prompt, the context lives in a Python REPL and your best
 model orchestrates it — searching, decomposing, and delegating leaf reads to cheap worker

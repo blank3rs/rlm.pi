@@ -26,8 +26,11 @@ pi uninstall npm:@hicaru/pi-rlm
 
 Затем выполните `/reload` или перезапустите Pi — `/rlm`, `/rlm-config` и `/rlm-stop` появятся в разделе **[Extensions]**. Переключение — `Ctrl+Shift+R` или `/rlm`.
 
-## Что такое pi-rlm?
+<p align="center">
+  <img src="https://github.com/openzebra/rlm.pi/blob/master/assets/hero.png" width="100%" alt="rlm.pi — OOLONG benchmark results">
+</p>
 
+## Что такое pi-rlm?
 Плагин, который превращает сессию Pi в **рекурсивную языковую модель (RLM)**: вместо того чтобы заталкивать огромный документ в промпт, контекст живёт в Python REPL, а ваша лучшая модель им управляет — ищет, декомпозирует и делегирует чтения дешёвым worker-моделям, рекурсивно. Та же сессия Pi, те же инструменты, те же ключи — включите `/rlm` и вперёд. По методу [RLM paper](https://arxiv.org/abs/2512.24601); подробности — в разделе **Как это работает**.
 
 ## Бенчмарки
