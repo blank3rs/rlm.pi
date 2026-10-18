@@ -95,8 +95,20 @@ export interface EngineDeps {
 /** Build a `runRlm` bound to the given deps. The returned function is reused for recursion. */
 export function createEngine(deps: EngineDeps): RunRlm {
   const { emitter } = deps;
+  const defaultGates =
+    deps.gates ?? createSubcallGates(deps.config.maxConcurrentSubcalls, deps.config.maxConcurrentChildren);
   const run: RunRlm = async (input: RlmInput): Promise<RlmResult> => {
     const runCwd = process.cwd();
+    const runAbort = new AbortController();
+    const onParentAbort = (): void => {
+      runAbort.abort();
+    };
+    if (deps.signal?.aborted) {
+      runAbort.abort();
+    } else {
+      deps.signal?.addEventListener("abort", onParentAbort, { once: true });
+    }
+    const runSignal = runAbort.signal;
     // For depth > 0, input.parentNodeId is the subcall ID created by the parent's rlm-query bridge.
     // For depth 0, input.parentNodeId is undefined — engine uses root-level bridge methods.
     const selfReportId = input.depth === 0 ? undefined : input.parentNodeId;
@@ -176,11 +188,10 @@ export function createEngine(deps: EngineDeps): RunRlm {
     // the choice rides in on input.rectification (deterministic, logged). DOCTRINE: the
     // model/provider pair is never a rectification axis — a failing model retries on itself
     // until the attempt budget is exhausted, then fails loudly. No silent fallback.
-    const leafLimit = input.rectification?.kind === "reduce-concurrency"
-      ? input.rectification.maxConcurrentSubcalls
-      : deps.config.maxConcurrentSubcalls;
-    const gates = deps.gates
-      ?? createSubcallGates(leafLimit, deps.config.maxConcurrentChildren);
+    const gates =
+      input.rectification?.kind === "reduce-concurrency"
+        ? createSubcallGates(input.rectification.maxConcurrentSubcalls, deps.config.maxConcurrentChildren)
+        : defaultGates;
     const subcallDeps = {
       resolve: () => invocation,
       gates,
@@ -188,7 +199,7 @@ export function createEngine(deps: EngineDeps): RunRlm {
       getLlmModel: () => deps.llmModel,
       getModel: () => model,
       getConfig: () => deps.config,
-      signal: deps.signal,
+      signal: runSignal,
       runChild: run,
       // Read lazily: a source added on turn 3 must reach a child spawned on turn 4. Safe
       // despite being wired before liveContext is assigned — children can only spawn from an
@@ -340,7 +351,7 @@ export function createEngine(deps: EngineDeps): RunRlm {
             cwd: runCwd,
             emitter,
             parentId: selfReportId,
-            signal: deps.signal,
+            signal: runSignal,
             getContext: () => liveContext,
             onLoaded: async (payload) => {
               // The accumulator is what children inherit, which is what makes inheritance
@@ -359,7 +370,7 @@ export function createEngine(deps: EngineDeps): RunRlm {
         execTimeoutS: deps.config.execTimeoutS,
         requestTimeoutMs: deps.config.requestTimeoutMs,
         python: deps.config.python,
-        signal: deps.signal,
+        signal: runSignal,
         initTimeoutMs: deps.config.sandboxInitTimeoutMs,
         maxPromptChars: deps.config.maxPromptChars,
         awaitTimeoutS: Math.round(deps.config.requestTimeoutMs / 1000),
@@ -406,7 +417,7 @@ export function createEngine(deps: EngineDeps): RunRlm {
             registry: deps.registry,
             contextWindow: model.contextWindow,
             retry: retryPolicy(deps.config),
-            signal: deps.signal,
+            signal: runSignal,
           };
           if (shouldCompact(history)) {
             // Workstream A: with Σ active, rebase structurally — [P, Σ_t, window(O)] — and
@@ -472,7 +483,7 @@ export function createEngine(deps: EngineDeps): RunRlm {
           registry: deps.registry,
           sampling: rootSampling,
           retry: deps.complete === undefined ? retryPolicy(deps.config) : undefined,
-          signal: deps.signal,
+          signal: runSignal,
           // Long-context providers: bigmodel.cn TTFB scales ~1 min per 10k ctx chars; the
           // pi-ai default idle cap aborts such turns as "Request timed out". One knob, both seams.
           timeoutMs: deps.config.requestTimeoutMs,
@@ -639,7 +650,7 @@ export function createEngine(deps: EngineDeps): RunRlm {
         }
       }
       if (pendingReplOutputs) appendUserMessage(history, pendingReplOutputs);
-      const finalized = result(await finalize(history, model, deps, limits, sandbox), completedTurns, limits, lastStdout);
+      const finalized = result(await finalize(history, model, deps, limits, sandbox, runSignal), completedTurns, limits, lastStdout);
       lastAnswer = finalized.answer;
       return finalized;
     } catch (err) {
@@ -674,7 +685,10 @@ export function createEngine(deps: EngineDeps): RunRlm {
       }
       clearInterval(watchdogHeartbeat);
       // Settle detached work FIRST: a child still running may be about to pin this same payload.
+      // Past DETACHED_SETTLE_MS, abort runAbort so orphan sub-calls never leak into later runs.
       await settleDetached();
+      runAbort.abort();
+      deps.signal?.removeEventListener("abort", onParentAbort);
       await contextPin?.release();
       await sandbox?.dispose();
     }
@@ -733,6 +747,7 @@ async function finalize(
   deps: EngineDeps,
   limits: LimitGuard,
   sandbox: PythonSandbox,
+  signal: AbortSignal,
 ): Promise<string> {
   const finalHistory = [...history];
   appendUserMessage(finalHistory, FINALIZE_PROMPT);
@@ -750,7 +765,9 @@ async function finalize(
     maxTokens: rootSampling.maxTokens,
     temperature: rootSampling.temperature,
     reasoning: rootSampling.reasoning,
-    signal: deps.signal,
+    retry: deps.complete === undefined ? retryPolicy(deps.config) : undefined,
+    timeoutMs: deps.config.requestTimeoutMs,
+    signal,
   });
   limits.addUsage(usage);
   const blocks = findReplBlocks(text);

@@ -9,7 +9,7 @@
  * reported pooled, never single-run — aggregate with bench/report.ts.
  *
  * Env vars (the only key transport — never hardcode keys, never commit them):
- *   OPENROUTER_API_KEY / ZAI_API_KEY  required (matches the --model provider)
+ *   OPENROUTER_API_KEY / ZAI_API_KEY / BAI_API_KEY  required (matches the --model provider)
  *   RLM_BENCH_MODEL           optional, default DEFAULT_MODEL_REF (openrouter/qwen/qwen3.8-27b)
  *   RLM_BENCH_CONTEXT_WINDOW  optional, default 1000000
  *
@@ -18,6 +18,7 @@
  *   bun run bench/run.ts --limit 1            # first task only
  *   bun run bench/run.ts --oolong-max-cl 65536 --oolong-limit 24
  *                                             # extended oolong: context_len cap / task count
+ *   bun run bench/run.ts --model b-ai/qwen3.8-27b
  *   bun run bench/run.ts --model openrouter/google/gemma-4-31b-it:free
  *   bun run bench/run.ts --sub-model zai/glm-4.7   # llm tier (thinking off by dialect)
  *   bun run bench/run.ts --list               # print tasks + context sizes, no engine
@@ -68,6 +69,8 @@ interface Args {
    *  water family is a token black hole (plan §1.2), so it gets its own suite run. */
   readonly taskIds?: readonly string[];
   readonly resume: boolean;
+  /** Optional cooldown pause (ms) between executed benchmark tasks. */
+  readonly taskDelayMs?: number;
 }
 
 function parseArgs(argv: readonly string[]): Args {
@@ -86,6 +89,7 @@ function parseArgs(argv: readonly string[]): Args {
   let poolOnly = false;
   let taskIds: readonly string[] | undefined;
   let resume = false;
+  let taskDelayMs: number | undefined;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const next = (): string => {
@@ -133,13 +137,17 @@ function parseArgs(argv: readonly string[]): Args {
       journal = next();
     } else if (a === "--resume") {
       resume = true;
+    } else if (a === "--task-delay-ms") {
+      const v = Number(next());
+      if (!Number.isInteger(v) || v < 0) throw new Error(`--task-delay-ms must be a non-negative integer`);
+      taskDelayMs = v;
     } else if (a === "--list") {
       list = true;
     } else {
       throw new Error(`unknown argument: ${a}`);
     }
   }
-  return { suite, limit, model, subModel, journal, oolongMaxCl, oolongLimit, oolongLabels, runs, maxIterations, temperature, list, poolOnly, taskIds, resume };
+  return { suite, limit, model, subModel, journal, oolongMaxCl, oolongLimit, oolongLabels, runs, maxIterations, temperature, list, poolOnly, taskIds, resume, taskDelayMs };
 }
 
 function printTasks(tasks: readonly BenchTask[]): void {
@@ -148,9 +156,11 @@ function printTasks(tasks: readonly BenchTask[]): void {
   }
 }
 
-/** Journal row → dedup key for --resume; tolerant of foreign/malformed lines (returns undefined). */
+/** Journal row → dedup key for --resume; tolerant of foreign/malformed lines (returns undefined).
+ *  Rows that terminated with an upstream `error` are NOT treated as completed so `--resume` re-runs them. */
 function resumeKeyOf(v: unknown): string | undefined {
   if (typeof v !== "object" || v === null) return undefined;
+  if ("error" in v && typeof v.error === "string" && v.error.length > 0) return undefined;
   const taskId = "taskId" in v ? v.taskId : undefined;
   const run = "run" in v ? v.run : undefined;
   const model = "model" in v ? v.model : undefined;
@@ -334,12 +344,17 @@ async function main(): Promise<void> {
       (wroteConfig ? `  config=${configPath}` : ""),
   );
 
+  const effectiveTaskDelayMs = args.taskDelayMs ?? (Number(process.env.RLM_BENCH_TASK_DELAY_MS ?? 0) || 0);
   const rows: BenchRow[] = [];
   for (let runIndex = 1; runIndex <= (args.runs ?? 1); runIndex++) {
     for (const task of tasks) {
       if (resumed.has(`${target.ref}#${task.id}#${runIndex}`)) {
         console.log(`  = ${task.suite}/${task.id} run=${runIndex} skipped (already in journal)`);
         continue;
+      }
+      if (rows.length > 0 && effectiveTaskDelayMs > 0) {
+        console.log(`  ⏳ waiting ${Math.round(effectiveTaskDelayMs / 1000)}s before ${task.suite}/${task.id}...`);
+        await new Promise((resolve) => setTimeout(resolve, effectiveTaskDelayMs));
       }
       let row: BenchRow;
       try {

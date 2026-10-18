@@ -27,12 +27,13 @@ Adaptation vs the lab: this engine's sandbox exposes retrieval + delegation only
 The API key travels **via env vars only** — never hardcode it, never commit it.
 
 ```bash
-export OPENROUTER_API_KEY=sk-or-...        # required
+export OPENROUTER_API_KEY=sk-or-...        # required (or ZAI_API_KEY / BAI_API_KEY)
 bun run bench/run.ts                       # oolong, default model, 8 tasks @ cl ≤ 2048
 bun run bench/run.ts --limit 1             # first task only
 bun run bench/run.ts --oolong-max-cl 65536 --oolong-limit 24
                                            # extended oolong: context_len cap / task count
 bun run bench/run.ts --model zai/glm-4.7
+bun run bench/run.ts --model b-ai/qwen3.8-27b
 bun run bench/run.ts --list                # print tasks + context sizes, no engine
 bun run bench/run.ts --journal bench/runs/foo.jsonl --resume
                                            # crash-safe pooled run: rows already in the
@@ -47,6 +48,7 @@ Optional env vars:
 |-----|---------|---------|
 | `RLM_BENCH_MODEL` | `openrouter/qwen/qwen3.8-27b` | Model under test — one of the three-model panel (`qwen3.8-27b` / `mercury-2.5` / `glm-4.7`). A full oolong run costs ≈ $0.03–0.30 by model. Free pools die mid-stream (`finish_reason:"error"` with no payload) |
 | `ZAI_API_KEY` | — | Required for `zai/*` models (Z.ai coding endpoint, e.g. `zai/glm-4.7`); OpenRouter models use `OPENROUTER_API_KEY` only |
+| `BAI_API_KEY` | — | Required for `b-ai/*` models (`https://api.b.ai/v1`, e.g. `b-ai/qwen3.8-27b`) |
 | `RLM_BENCH_CONTEXT_WINDOW` | `1000000` | Advertised context window of the model under test (budget math uses it) |
 
 ### Recall eval (no API key needed)

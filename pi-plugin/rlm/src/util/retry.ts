@@ -193,7 +193,12 @@ export async function completeWithRetry<T>(
         if (rlTries + 1 >= policy.rateLimitMaxAttempts) throw err;
         rlTries++;
         const hint = retryAfterMs(headers);
-        cooldown.penalize(provider, hint !== undefined ? Math.min(hint, policy.throttleMaxMs) : undefined);
+        cooldown.penalize(
+          provider,
+          hint !== undefined ? Math.min(hint, policy.throttleMaxMs) : undefined,
+          policy.throttleBaseMs,
+          policy.throttleMaxMs,
+        );
         continue;
       }
       if (tries + 1 >= policy.maxAttempts) throw err;

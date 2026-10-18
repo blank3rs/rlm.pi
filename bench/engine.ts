@@ -50,13 +50,15 @@ export interface BenchTarget {
 // Coding-plan endpoint is the only channel where glm-4.7 avoids 429 (plan §0 probe:
 // global/china plain channels are balance-gated for non-flash models, 2025-09-09).
 const ZAI_BASE_URL = "https://api.z.ai/api/coding/paas/v4";
+const BAI_BASE_URL = "https://api.b.ai/v1";
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 
-/** Accepts "openrouter/<id>" / "zai/<id>" (project ref convention) or a bare "<id>";
+/** Accepts "openrouter/<id>" / "zai/<id>" / "b-ai/<id>" (project ref convention) or a bare "<id>";
  *  openrouter implied for bare ids. */
 export function resolveTarget(raw: string): BenchTarget {
-  const id = raw.trim().replace(/^openrouter\//, "");
-  if (id !== raw.trim()) {
+  const trimmed = raw.trim();
+  const id = trimmed.replace(/^openrouter\//, "");
+  if (id !== trimmed) {
     return Object.freeze({
       ref: `openrouter/${id}`,
       provider: "openrouter",
@@ -65,14 +67,24 @@ export function resolveTarget(raw: string): BenchTarget {
       baseUrl: OPENROUTER_BASE_URL,
     });
   }
-  const zaiId = raw.trim().replace(/^zai\//, "");
-  if (zaiId !== raw.trim()) {
+  const zaiId = trimmed.replace(/^zai\//, "");
+  if (zaiId !== trimmed) {
     return Object.freeze({
       ref: `zai/${zaiId}`,
       provider: "zai",
       id: zaiId,
       contextWindow: BENCH_CONTEXT_WINDOW,
       baseUrl: ZAI_BASE_URL,
+    });
+  }
+  const baiId = trimmed.replace(/^(?:b-ai|b\.ai|bai)\//i, "").toLowerCase();
+  if (/^(?:b-ai|b\.ai|bai)\//i.test(trimmed)) {
+    return Object.freeze({
+      ref: `b-ai/${baiId}`,
+      provider: "b-ai",
+      id: baiId,
+      contextWindow: BENCH_CONTEXT_WINDOW,
+      baseUrl: BAI_BASE_URL,
     });
   }
   return Object.freeze({
@@ -86,7 +98,12 @@ export function resolveTarget(raw: string): BenchTarget {
 
 /** The ONLY key transport is the environment. Fail fast with an actionable message. */
 export function requireApiKey(provider = "openrouter"): string {
-  const envVar = provider === "zai" ? "ZAI_API_KEY" : "OPENROUTER_API_KEY";
+  const envVar =
+    provider === "zai"
+      ? "ZAI_API_KEY"
+      : provider === "b-ai"
+        ? "BAI_API_KEY"
+        : "OPENROUTER_API_KEY";
   const key = process.env[envVar];
   if (!key || key.trim().length === 0) {
     throw new Error(
@@ -205,12 +222,14 @@ export function makeRun(target: BenchTarget, apiKey: string, opts?: BenchRunOpts
   const config: RlmConfig = {
     ...DEFAULT_CONFIG,
     maxIterations: opts?.maxIterations ?? BENCH_MAX_ITERATIONS,
-    maxConcurrentSubcalls: 4, // free-tier rate limits are tight; retry/throttle handles the rest
+    maxConcurrentSubcalls: target.provider === "zai" ? 1 : DEFAULT_CONFIG.maxConcurrentSubcalls,
+    maxConcurrentChildren: target.provider === "zai" ? 1 : DEFAULT_CONFIG.maxConcurrentChildren,
     // Free-pool upstreams flake (transient "finish_reason: error"); a bench row should mean
     // "the model failed the task", not "the pool hiccuped" — so retry harder than interactive.
     retryMaxAttempts: 5,
-    retryBaseDelayMs: 1_000,
-    retryMaxDelayMs: 30_000,
+    rateLimitMaxAttempts: 30,
+    retryBaseDelayMs: target.provider === "zai" ? 5_000 : 1_500,
+    retryMaxDelayMs: target.provider === "zai" ? 30_000 : 20_000,
     autoSeedCwd: false, // tasks carry explicit context; never sweep the repo into a run
     // Paper-tier tasks carry 100–400k-char contexts; the budget cascade caps a task at
     // contextWindow × budgetShare (≈33k tokens on a 131k window) — below the raw context

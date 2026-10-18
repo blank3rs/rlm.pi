@@ -1,7 +1,7 @@
 {
-  "gitRev": "529e1a2",
-  "startedAt": "2026-10-17T20:26:53.701Z",
-  "model": "zai/glm-4.5-flash",
+  "gitRev": "ae1f72a",
+  "startedAt": "2026-10-18T11:44:52.645Z",
+  "model": "zai/glm-4.7-flash",
   "subModel": null,
   "suite": "oolong",
   "limit": null,
@@ -10,7 +10,7 @@
   "oolongLimit": 24,
   "oolongLabels": false,
   "runs": 1,
-  "maxIterations": 12,
+  "maxIterations": 16,
   "temperature": 0,
   "skillState": true,
   "pricing": {

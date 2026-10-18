@@ -35,7 +35,7 @@ OUT_DEFAULT = os.path.join(ROOT, "assets", "hero.png")
 BENCH_LINE = "OOLONG (oolong-synth)  ·  context ≤ 65,536 tok  ·  temp 0  ·  newest full journal per model"
 
 # Canonical model set — anything else in the journals must never chart.
-CANONICAL_MODELS = frozenset({"qwen3.8-27b", "mercury-2.5", "glm-4.7", "glm-4.5-flash"})
+CANONICAL_MODELS = frozenset({"qwen3.8-27b", "mercury-2.5", "glm-4.7", "glm-4.7-flash"})
 
 # A journal with fewer scored rows is a smoke/sanity probe, not a sample —
 # it must never hijack a model's bar via mtime ordering.
@@ -164,7 +164,7 @@ def render(stats, out_path: str) -> None:
         ax.grid(axis="y", color="#eceff1", linewidth=0.8)
 
     fig.text(0.5, 0.035,
-             "canonical set: zai/glm-4.7 · zai/glm-4.5-flash · qwen3.8-27b · mercury-2.5   ·   n = scored rows",
+             "canonical set: zai/glm-4.7-flash · zai/glm-4.7 · qwen3.8-27b · mercury-2.5   ·   n = scored rows",
              ha="center", fontsize=8, color="#90a4ae")
     fig.text(0.5, 0.012,
              "rows: bench/runs/*.jsonl (latest journal per model) · regenerate: python3 bench/hero.py",

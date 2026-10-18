@@ -36,6 +36,7 @@ export function sleepMs(ms: number, signal?: AbortSignal): Promise<void> {
 export class ProviderCooldown {
   private readonly blockedUntil = new Map<string, number>();
   private readonly strikes = new Map<string, number>();
+  private readonly parkedWaiters = new Map<string, number>();
 
   constructor(private readonly baseMs: number, private readonly maxMs: number) {}
 
@@ -45,16 +46,37 @@ export class ProviderCooldown {
   }
 
   /** Park until the window opens. Re-checks after every wake — penalize() may extend it.
-   *  `onPark` fires with the pending ms before each sleep (UI: "queued on rate limit"),
+   *  When multiple callers are parked concurrently on the same provider, releases are
+   *  staggered by `min(baseMs, 1000)` ms so waking workers do not fire a synchronized
+   *  thundering-herd burst at the exact millisecond the cooldown expires.
+   *  `onPark` fires once with the initial pending ms (UI: "queued on rate limit"),
    *  `onRelease` once right after the wait ends — but only if we actually parked. */
   async wait(provider: string, signal?: AbortSignal, onPark?: (ms: number) => void, onRelease?: () => void): Promise<void> {
     let parked = false;
-    for (;;) {
-      const ms = this.waitMs(provider);
-      if (ms <= 0) break;
-      parked = true;
-      onPark?.(ms);
-      await sleepMs(ms, signal);
+    try {
+      for (;;) {
+        const ms = this.waitMs(provider);
+        if (ms <= 0) break;
+        if (!parked) {
+          parked = true;
+          this.parkedWaiters.set(provider, (this.parkedWaiters.get(provider) ?? 0) + 1);
+          onPark?.(ms);
+        }
+        await sleepMs(ms, signal);
+      }
+    } finally {
+      if (parked) {
+        const rem = (this.parkedWaiters.get(provider) ?? 1) - 1;
+        if (rem <= 0) {
+          this.parkedWaiters.delete(provider);
+        } else {
+          this.parkedWaiters.set(provider, rem);
+          const staggerMs = Math.min(this.baseMs, 1_000);
+          const nextUntil = Date.now() + staggerMs;
+          const prev = this.blockedUntil.get(provider) ?? 0;
+          if (nextUntil > prev) this.blockedUntil.set(provider, nextUntil);
+        }
+      }
     }
     if (parked) onRelease?.();
   }
@@ -65,11 +87,11 @@ export class ProviderCooldown {
    * even when the provider sends no timing at all — zai's `{"code":"1302",...}` body, for
    * one, carries none.
    */
-  penalize(provider: string, ms?: number): void {
+  penalize(provider: string, ms?: number, baseMs = this.baseMs, maxMs = this.maxMs): void {
     const strikes = (this.strikes.get(provider) ?? 0) + 1;
     this.strikes.set(provider, strikes);
-    const heuristic = Math.min(this.baseMs * 2 ** (strikes - 1), this.maxMs);
-    const until = Date.now() + Math.max(ms ?? 0, heuristic);
+    const heuristic = Math.min(baseMs * 2 ** (strikes - 1), maxMs);
+    const until = Date.now() + Math.min(Math.max(ms ?? 0, heuristic), maxMs);
     const prev = this.blockedUntil.get(provider) ?? 0;
     if (until > prev) this.blockedUntil.set(provider, until);
   }

@@ -98,6 +98,20 @@ async function main(): Promise<void> {
   check("providers are isolated", cd.waitMs("openai") === 0);
   await cd.wait("zai", undefined); // drains the ~10ms window
   check("wait() drains to free", cd.waitMs("zai") === 0);
+  {
+    const staggerCd = new ProviderCooldown(15, 200);
+    staggerCd.penalize("zai");
+    const wakeTimes: number[] = [];
+    let parkCalls = 0;
+    await Promise.all([
+      staggerCd.wait("zai", undefined, () => { parkCalls++; }).then(() => wakeTimes.push(Date.now())),
+      staggerCd.wait("zai", undefined, () => { parkCalls++; }).then(() => wakeTimes.push(Date.now())),
+    ]);
+    const gap = Math.abs((wakeTimes[1] ?? 0) - (wakeTimes[0] ?? 0));
+    check("concurrent parked waiters release staggered (not thundering herd)", gap >= 10, `gap=${gap}ms`);
+    check("onPark fires once per parked waiter", parkCalls === 2, `parkCalls=${parkCalls}`);
+    check("staggered wait() drains to free after last waiter", staggerCd.waitMs("zai") === 0);
+  }
 
   // ── completeWithRetry: transient 429 then success ──
   {

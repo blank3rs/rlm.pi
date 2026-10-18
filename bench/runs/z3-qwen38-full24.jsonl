@@ -1,0 +1,1 @@
+{"suite":"oolong","taskId":"oolong_0","model":"b-ai/qwen3.8-27b","run":1,"correct":true,"recall":1,"latencyMs":46204,"inputTokens":8154,"outputTokens":1477,"iterations":6,"costUsd":0,"answer":"Label: incorrect","gold":"\"['incorrect']\"","recovered":false,"answerSource":"final"}
