@@ -510,9 +510,6 @@ export function createEngine(deps: EngineDeps): RunRlm {
           emitter.emitRootUsage(turn.usage.totalTokens, turn.usage.input, turn.usage.output);
         }
         deps.onUsage?.(turn.usage, "root");
-        const answerContent = latestAnswerContentOf(turn.results);
-        if (answerContent) best = answerContent;
-        else if (!best && turn.response.trim()) best = turn.response;
         // Stdout fallback floor (P2 §3.4): keep the newest non-empty block output, always —
         // cheapest possible recovery for a run that never submits a final frame.
         const turnStdout = latestStdoutOf(turn.results);
@@ -544,7 +541,8 @@ export function createEngine(deps: EngineDeps): RunRlm {
           // confident wrong answers): a finalize that is bare, or arrived without any
           // inspection of the context, gets ONE coached redo, then the answer is accepted.
           if (deps.config.enableVerificationNudge === true && !verificationNudged
-            && completedTurns < VERIFICATION_NUDGE_TURN_CAP && isBareAnswer(final, sawRetrieval, sawDelegation)) {
+            && ((i === 0 && turn.blocks.length === 0)
+              || (completedTurns < VERIFICATION_NUDGE_TURN_CAP && isBareAnswer(final, sawRetrieval, sawDelegation)))) {
             verificationNudged = true;
             verificationNudgePending = true;
           } else {
@@ -553,7 +551,11 @@ export function createEngine(deps: EngineDeps): RunRlm {
             return done;
           }
         }
-
+        if (!verificationNudgePending) {
+          const answerContent = latestAnswerContentOf(turn.results);
+          if (answerContent) best = answerContent;
+          else if (!best && turn.response.trim()) best = turn.response;
+        }
         limits.observe(turnHadError(turn.results));
         history.push({ role: "assistant", content: turn.response });
         pendingReplOutputs = formatReplOutputs(turn.results, turn.skippedBlocks, { verbatimChars: deps.config.stdoutVerbatimChars });

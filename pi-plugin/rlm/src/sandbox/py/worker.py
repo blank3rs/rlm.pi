@@ -452,8 +452,11 @@ class Worker(WorkerScaffold):
         answer_content = answer.get("content", "") if isinstance(answer, dict) else ""
         # ready may have been flipped with empty content before content was assigned later
         # in the same block; the dict's current content is the real submission.
-        if final is not None and not final.strip() and str(answer_content).strip():
-            final = str(answer_content)
+        if final is not None:
+            if not final.strip() and str(answer_content).strip():
+                final = str(answer_content)
+            if isinstance(answer, dict) and final.strip():
+                dict.__setitem__(answer, "ready", False)
         nudges = self._nudge_lines()
         return {
             "stdout": stdout,

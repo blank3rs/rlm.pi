@@ -383,6 +383,18 @@ async function main(): Promise<void> {
       const out = await engine({ rootPrompt: "nudge-late-9414", context: "ctx", depth: 0 });
       check("nudge: late bare finalize (turn >= 4) is accepted", out.answer === "42" && calls.length === 4, `calls=${calls.length}`);
     }
+    // After a nudged turn, answer["ready"] is reset so assigning a scratch draft to
+    // answer["content"] on the redo turn does not auto-finalize before ready is flipped.
+    {
+      const { complete, calls } = captureComplete([
+        ready("guess"),
+        repl('answer["content"] = "draft"'),
+        ready("final-verified"),
+      ]);
+      const engine = createEngine({ model: wireModel(false), llmModel: wireModel(false), registry: MOCK_REGISTRY, config: nudgeCfg(6), emitter: new RlmEmitter(), complete });
+      const out = await engine({ rootPrompt: "nudge-ready-reset-9415", context: "ctx", depth: 0 });
+      check("nudge: ready resets after a nudged turn so a draft content write does not finalize", out.answer === "final-verified" && calls.length === 3, `answer=${out.answer} calls=${calls.length}`);
+    }
     // The flag survives the rlm.json validation seam.
     check("nudge: enableVerificationNudge survives validateConfig", validateConfig({ enableVerificationNudge: true }).enableVerificationNudge === true);
   }
