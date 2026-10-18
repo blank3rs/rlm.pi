@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """bench/hero.py — render the rlm.pi hero chart (assets/hero.png).
 
-Single source of truth: the bench journals in bench/runs/*.jsonl. For each
+Single source of truth: the bench journals in bench/runs/<model>/*.jsonl. For each
 model only the NEWEST journal that contains its rows is charted (older files
 are stale history). Two panels:
 
@@ -34,8 +34,10 @@ OUT_DEFAULT = os.path.join(ROOT, "assets", "hero.png")
 
 BENCH_LINE = "OOLONG (oolong-synth)  ·  context ≤ 65,536 tok  ·  temp 0  ·  newest full journal per model"
 
-# Canonical model set — anything else in the journals must never chart.
-CANONICAL_MODELS = frozenset({"qwen3.8-27b", "mercury-2.5", "glm-4.7", "glm-4.7-flash"})
+# Canonical model set = bench/panel.json — anything else in the journals must never chart.
+with open(os.path.join(ROOT, "bench", "panel.json"), encoding="utf-8") as _fh:
+    PANEL = json.load(_fh)["models"]
+CANONICAL_MODELS = frozenset(m.rstrip("/").split("/")[-1] for m in PANEL)
 
 # A journal with fewer scored rows is a smoke/sanity probe, not a sample —
 # it must never hijack a model's bar via mtime ordering.
@@ -54,9 +56,9 @@ def short_model(model: str) -> str:
 
 
 def load_rows():
-    """Read every bench/runs/*.jsonl row; tag each row with its source mtime."""
+    """Read every bench/runs/**/*.jsonl row; tag each row with its source mtime."""
     rows = []
-    for path in sorted(glob.glob(os.path.join(RUNS, "*.jsonl"))):
+    for path in sorted(glob.glob(os.path.join(RUNS, "**", "*.jsonl"), recursive=True)):
         try:
             mtime = os.path.getmtime(path)
             with open(path, "r", encoding="utf-8") as fh:
@@ -78,7 +80,7 @@ def load_rows():
 
 
 def aggregate(rows):
-    """Group by model; newest journal (>= MIN_CHART_ROWS rows) per model; canonical trio only."""
+    """Group by model; newest journal (>= MIN_CHART_ROWS rows) per model; panel models only."""
     counts: dict = {}
     for r in rows:
         key = (r["model"], r["_mtime"])
@@ -164,10 +166,10 @@ def render(stats, out_path: str) -> None:
         ax.grid(axis="y", color="#eceff1", linewidth=0.8)
 
     fig.text(0.5, 0.035,
-             "canonical set: zai/glm-4.7-flash · zai/glm-4.7 · qwen3.8-27b · mercury-2.5   ·   n = scored rows",
+             "panel: " + " · ".join(PANEL) + "   ·   n = scored rows",
              ha="center", fontsize=8, color="#90a4ae")
     fig.text(0.5, 0.012,
-             "rows: bench/runs/*.jsonl (latest journal per model) · regenerate: python3 bench/hero.py",
+             "rows: bench/runs/<model>/*.jsonl (latest journal per model) · regenerate: python3 bench/hero.py",
              ha="center", fontsize=8, color="#b0bec5")
     fig.tight_layout(rect=[0, 0.05, 1, 0.84])
     fig.savefig(out_path, facecolor="white", dpi=150)
@@ -181,7 +183,7 @@ def main() -> None:
 
     rows = load_rows()
     if not rows:
-        raise SystemExit("no journal rows found in bench/runs/*.jsonl")
+        raise SystemExit("no journal rows found in bench/runs/<model>/*.jsonl")
     stats = aggregate(rows)
     if not stats:
         raise SystemExit("no model rows aggregated")

@@ -26,50 +26,23 @@ pi uninstall npm:@hicaru/pi-rlm
 
 Затем выполните `/reload` или перезапустите Pi — `/rlm`, `/rlm-config` и `/rlm-stop` появятся в разделе **[Extensions]**. Переключение — `Ctrl+Shift+R` или `/rlm`.
 
-<p align="center">
-  <img src="https://github.com/openzebra/rlm.pi/blob/master/assets/hero.png?raw=true" width="100%" alt="rlm.pi — результаты OOLONG">
-</p>
-
 ## Что такое pi-rlm?
 
 Плагин, который превращает сессию Pi в **рекурсивную языковую модель (RLM)**: вместо того чтобы заталкивать огромный документ в промпт, контекст живёт в Python REPL, а ваша лучшая модель им управляет — ищет, декомпозирует и делегирует чтения дешёвым worker-моделям, рекурсивно. Та же сессия Pi, те же инструменты, те же ключи — включите `/rlm` и вперёд. По методу [RLM paper](https://arxiv.org/abs/2512.24601); подробности — в разделе **Как это работает**.
 
 ## Бенчмарки
 
-**OOLONG (oolong-synth)** — paper-tier сюит длинного контекста; последний журнал каждой модели, цена за задачу из реального `costUsd` (старые журналы оценены по прайс-листу OpenRouter):
+Бенчмарк — **OOLONG** (oolong-synth): 24 задачи, контекст до 65 536 токенов, температура 0.
 
-| Модель | Счёт | Цена/задача |
-|--------|------|-------------|
-| `qwen/qwen3.8-27b` | **100%** | $0.0127 |
-| `google/gemma-3-27b-it` | 83.3% | $0.0013 |
-| `qwen/qwen3-30b-a3b-instruct-2507` | 66.7% | $0.0009 |
-| `mistralai/mistral-small-3.2-24b-instruct` | 66.7% | $0.0025 |
+| Модель | OOLONG | Токенов/задача | Цена/задача |
+|---|---|---|---|
+| `zai/glm-5.3` | ожидается | — | — |
+| `b-ai/qwen3.8-27b` | ожидается | — | — |
+| `openrouter/openai/gpt-oss-120b` | ожидается | — | — |
 
-Lite-сьют — `needle` (поиск игл в куче), `codeqa` (вопросы по коду), `coding` (задача-фикс; 7 задач × 2 прохода на модель, детерминированные грейдеры, без LLM-судьи):
-
-| Модель | Счёт | Точность |
-|--------|------|----------|
-| `qwen/qwen3-30b-a3b-instruct-2507` | **14/14** | **100%** |
-| `google/gemma-3-27b-it` | 12/14 | 86% |
-| `mistralai/mistral-small-3.2-24b-instruct` | 12/14 | 86% |
-
-Построчные результаты (correct, recall, latency, токены, цена) — в
-`bench/runs/*.jsonl`, одна JSONL-строка на задачу.
-
-### Как запустить
-
-```bash
-export OPENROUTER_API_KEY=sk-or-...        # обязателен — ключи ходят только через env
-
-bun run bench                              # lite-сьют: needle + codeqa + coding
-bun run bench --suite needle --limit 1     # один сьют, первая задача
-bun run bench --model openrouter/qwen/qwen3-30b-a3b-instruct-2507
-bun run bench --list                       # показать задачи, без движка и ключа
-bun run bench --suite paper                # paper-сьют: s_niah, oolong, browsecomp, codeqa_lb (скачивает датасеты)
-```
-
-Сьюты: `all` (lite, по умолчанию) · `needle` · `codeqa` · `coding` · `paper` · `s_niah` ·
-`oolong` · `browsecomp` · `codeqa_lb`.
+Список моделей — в `bench/panel.json`. Результаты — в `bench/runs/<model>/`.
+Как запустить бенчмарк — см.
+[корневой README](https://github.com/openzebra/rlm.pi/blob/master/README.ru.md#бенчмарки).
 
 ## Как это работает
 

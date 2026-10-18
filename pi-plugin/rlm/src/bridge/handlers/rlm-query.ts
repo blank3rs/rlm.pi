@@ -210,6 +210,7 @@ async function childRun(
     parentNodeId: subId,
     remainingTimeoutMs: remTimeout,
     ledger, // DRY #6: the one seam — children share the parent's blackboard
+    signal: deps.signal,
     // SKILL.state Ξ (Workstream C, DRY #6): the parent's block rides along — the only
     // child-RlmInput construction site, so inheritance cannot grow a second path.
     ...(skillBlock === undefined ? {} : { skillBlock }),

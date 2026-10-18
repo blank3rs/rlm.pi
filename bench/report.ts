@@ -5,8 +5,8 @@
  * taskGroup/answerType of each task plus the "ceiling cluster" (tasks no run ever passed).
  *
  * Usage (from the repo root):
- *   bun run bench/report.ts bench/runs/r3-oolong-qwen38-27b.jsonl
- *   bun run bench/report.ts bench/runs/a.jsonl bench/runs/b.jsonl --by-run
+ *   bun run bench/report.ts bench/runs/glm-5.3/<timestamp>.jsonl
+ *   bun run bench/report.ts bench/runs/glm-5.3/a.jsonl bench/runs/qwen3.8-27b/b.jsonl --by-run
  */
 
 import { readdirSync, readFileSync } from "node:fs";

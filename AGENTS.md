@@ -139,3 +139,5 @@ Notation in comments: `P` spec, `Σ_t` state, `ΔΣ_t` patch, `⊕` merge (`null
 - Tests live in `pi-plugin/rlm/test/`; `bun run test` (`test/smoke.ts`) runs every suite
   and boots a real sandbox (needs `python3`).
 - Fix → reproduce it in a test first, then make it pass. Keep tests as small as the code.
+- Benchmarks: the model panel lives only in `bench/panel.json`; journals go to
+  `bench/runs/<model>/`. Never commit probes or off-panel journals.

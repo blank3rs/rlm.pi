@@ -29,10 +29,6 @@ Then `/reload` (or restart) — `/rlm`, `/rlm-config`, `/rlm-stop` appear under
 | **Pi**       | `pi install npm:@hicaru/pi-rlm`     | `pi install npm:@hicaru/pi-rlm --force`     | `pi uninstall npm:@hicaru/pi-rlm`     |
 | **oh-my-pi** | `omp plugin install @hicaru/pi-rlm` | `omp plugin install @hicaru/pi-rlm --force` | `omp plugin uninstall @hicaru/pi-rlm` |
 
-<p align="center">
-  <img src="https://github.com/openzebra/rlm.pi/blob/master/assets/hero.png?raw=true" width="100%" alt="rlm.pi — OOLONG benchmark results">
-</p>
-
 ## What is pi-rlm?
 
 A Pi plugin that turns your session into a **Recursive Language Model (RLM)**: instead of
@@ -43,38 +39,17 @@ models, recursively. Same Pi session, same tools, same keys: `/rlm` and go. Read
 
 ## Benchmarks
 
-**OOLONG (oolong-synth)** — paper-tier long-context suite (the only suite); latest
-journal per model, cost per task from real `costUsd`:
+The benchmark is **OOLONG** (oolong-synth): 24 tasks, context up to 65,536 tokens, temperature 0.
 
-| Model                              | Score             | Avg. tokens/task | Avg. cost/task |
-| ---------------------------------- | ----------------- | ---------------- | -------------- |
-| `zai/glm-4.7`                      | **91.7%** (22/24) | ~36k             | $0.0000 *      |
-| `zai/glm-4.7-flash`                | **75.0%** (18/24) | ~56k             | $0.0000 *      |
-| `openrouter/qwen/qwen3.8-27b`      | 49%               | ~73k             | $0.1038        |
-| `openrouter/inception/mercury-2.5` | 38%               | ~77k             | $0.0052        |
+| Model | OOLONG | Tokens/task | Cost/task |
+|---|---|---|---|
+| `zai/glm-5.3` | pending | — | — |
+| `b-ai/qwen3.8-27b` | pending | — | — |
+| `openrouter/openai/gpt-oss-120b` | pending | — | — |
 
-\* glm-4.7 runs on Z.ai's coding-plan endpoint — subscription billing, `costUsd` stays $0.
-
-In the [RLM paper](https://arxiv.org/abs/2512.24601), GPT-5-mini driven as an RLM outperforms
-GPT-o3 on OOLONG — recursion beats raw context, at a fraction of the price.
-
-Raw per-task rows (correct, recall, latency, tokens, cost) live in
-`bench/runs/*.jsonl` — one JSONL row per task, committed as history.
-
-### Run the benchmarks
-
-```bash
-export OPENROUTER_API_KEY=sk-or-...        # required for openrouter/* models
-export ZAI_API_KEY=...                     # required for zai/* models (coding endpoint)
-
-bun run bench                              # oolong suite, default model (qwen3.8-27b)
-bun run bench --model zai/glm-4.7
-bun run bench --model openrouter/inception/mercury-2.5
-bun run bench --list                       # print tasks, no engine / no key
-```
-
-One suite (`oolong`). Regenerate the hero chart:
-`python3 bench/hero.py` (needs `matplotlib`).
+The model list is in `bench/panel.json`. The results are in `bench/runs/<model>/`.
+To run the benchmark, see the
+[root README](https://github.com/openzebra/rlm.pi#benchmarks).
 
 ## How it works
 

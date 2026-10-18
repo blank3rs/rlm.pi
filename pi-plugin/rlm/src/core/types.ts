@@ -200,6 +200,8 @@ export interface RlmInput {
    *  THIS continuation invocation (narrowed child paths / reduced leaf admission). DOCTRINE:
    *  never a model/provider switch — a failing model retries to exhaustion and fails. */
   readonly rectification?: import("./budget.ts").RectifyAction;
+  /** Parent run's abort signal — set by childRun so a child dies with its parent's run. */
+  readonly signal?: AbortSignal;
 }
 
 /** Result of a completed RLM run. */

@@ -26,10 +26,6 @@ pi uninstall npm:@hicaru/pi-rlm
 
 然后在 Pi 中运行 `/reload` —— `/rlm`、`/rlm-config` 和 `/rlm-stop` 会出现在 **[Extensions]** 下。使用 `Ctrl+Shift+R` 或 `/rlm` 切换。
 
-<p align="center">
-  <img src="https://github.com/openzebra/rlm.pi/blob/master/assets/hero.png?raw=true" width="100%" alt="rlm.pi — OOLONG 基准测试结果">
-</p>
-
 ## 什么是 pi-rlm？
 
 一个把 Pi 会话变成**递归语言模型 (RLM)** 的插件：不必把庞大的文档塞进提示词，上下文
@@ -39,42 +35,16 @@ pi uninstall npm:@hicaru/pi-rlm
 
 ## 基准测试
 
-**OOLONG (oolong-synth)** —— paper 级长上下文套件；取每个模型最新的日志，每任务成本
-来自真实 `costUsd`（旧日志按 OpenRouter 牌价估算）：
+基准为 **OOLONG**（oolong-synth）：24 个任务，上下文最多 65,536 token，温度 0。
 
-| 模型 | 得分 | 每任务成本 |
-|------|------|------------|
-| `qwen/qwen3.8-27b` | **100%** | $0.0127 |
-| `google/gemma-3-27b-it` | 83.3% | $0.0013 |
-| `qwen/qwen3-30b-a3b-instruct-2507` | 66.7% | $0.0009 |
-| `mistralai/mistral-small-3.2-24b-instruct` | 66.7% | $0.0025 |
+| 模型 | OOLONG | token/任务 | 成本/任务 |
+|---|---|---|---|
+| `zai/glm-5.3` | 待测 | — | — |
+| `b-ai/qwen3.8-27b` | 待测 | — | — |
+| `openrouter/openai/gpt-oss-120b` | 待测 | — | — |
 
-精简套件 —— `needle`（多针召回）、`codeqa`（代码库问答）、`coding`（修复任务；
-每模型 7 个任务 × 2 轮，确定性评分，无 LLM 评审）：
-
-| 模型 | 得分 | 准确率 |
-|------|------|--------|
-| `qwen/qwen3-30b-a3b-instruct-2507` | **14/14** | **100%** |
-| `google/gemma-3-27b-it` | 12/14 | 86% |
-| `mistralai/mistral-small-3.2-24b-instruct` | 12/14 | 86% |
-
-逐任务原始数据（正确性、召回率、延迟、token、成本）位于 `bench/runs/*.jsonl`
-—— 每个任务一行 JSONL，作为历史记录提交。
-
-### 运行基准测试
-
-```bash
-export OPENROUTER_API_KEY=sk-or-...        # 必需 —— 密钥仅通过环境变量传递
-
-bun run bench                              # 精简套件：needle + codeqa + coding
-bun run bench --suite needle --limit 1     # 单个套件，仅第一个任务
-bun run bench --model openrouter/qwen/qwen3-30b-a3b-instruct-2507
-bun run bench --list                       # 仅列出任务，无需引擎和密钥
-bun run bench --suite paper                # paper 套件：s_niah, oolong, browsecomp, codeqa_lb（需下载数据集）
-```
-
-套件：`all`（精简版，默认） · `needle` · `codeqa` · `coding` · `paper` · `s_niah` ·
-`oolong` · `browsecomp` · `codeqa_lb`。
+模型列表见 `bench/panel.json`，结果见 `bench/runs/<model>/`。
+运行方法见[根目录 README](https://github.com/openzebra/rlm.pi/blob/master/README.zh-CN.md#基准测试)。
 
 ## 工作原理
 

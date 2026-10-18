@@ -57,7 +57,7 @@ import {
 } from "./budget.ts";
 import { ModelContextRegistry, modelsCachePath } from "./model-registry.ts";
 import type { RlmConfig, RlmInput, RlmResult, RunRlm, Sampling } from "./types.ts";
-import { createSubcallGates, type SubcallGates } from "../util/concurrency.ts";
+import { createSubcallGates, Semaphore, type SubcallGates } from "../util/concurrency.ts";
 
 /**
  * Grace period for detached sub-calls to settle before the run disposes its sandbox.
@@ -99,15 +99,13 @@ export function createEngine(deps: EngineDeps): RunRlm {
     deps.gates ?? createSubcallGates(deps.config.maxConcurrentSubcalls, deps.config.maxConcurrentChildren);
   const run: RunRlm = async (input: RlmInput): Promise<RlmResult> => {
     const runCwd = process.cwd();
+    // Per-run signal: aborts with the parent (input.signal for children), and in `finally`
+    // so orphan sub-calls never outlive the run.
+    const parentSignal = input.signal ?? deps.signal;
     const runAbort = new AbortController();
     const onParentAbort = (): void => {
       runAbort.abort();
     };
-    if (deps.signal?.aborted) {
-      runAbort.abort();
-    } else {
-      deps.signal?.addEventListener("abort", onParentAbort, { once: true });
-    }
     const runSignal = runAbort.signal;
     // For depth > 0, input.parentNodeId is the subcall ID created by the parent's rlm-query bridge.
     // For depth 0, input.parentNodeId is undefined — engine uses root-level bridge methods.
@@ -190,7 +188,7 @@ export function createEngine(deps: EngineDeps): RunRlm {
     // until the attempt budget is exhausted, then fails loudly. No silent fallback.
     const gates =
       input.rectification?.kind === "reduce-concurrency"
-        ? createSubcallGates(input.rectification.maxConcurrentSubcalls, deps.config.maxConcurrentChildren)
+        ? Object.freeze({ leaf: new Semaphore(input.rectification.maxConcurrentSubcalls), rlm: defaultGates.rlm })
         : defaultGates;
     const subcallDeps = {
       resolve: () => invocation,
@@ -325,6 +323,8 @@ export function createEngine(deps: EngineDeps): RunRlm {
     let verificationNudged = false;
     let verificationNudgePending = false;
 
+    if (parentSignal?.aborted) runAbort.abort();
+    else parentSignal?.addEventListener("abort", onParentAbort, { once: true });
     try {
       const meta = {
         contextType: contextTypeLabel(input.context),
@@ -685,10 +685,9 @@ export function createEngine(deps: EngineDeps): RunRlm {
       }
       clearInterval(watchdogHeartbeat);
       // Settle detached work FIRST: a child still running may be about to pin this same payload.
-      // Past DETACHED_SETTLE_MS, abort runAbort so orphan sub-calls never leak into later runs.
       await settleDetached();
       runAbort.abort();
-      deps.signal?.removeEventListener("abort", onParentAbort);
+      parentSignal?.removeEventListener("abort", onParentAbort);
       await contextPin?.release();
       await sandbox?.dispose();
     }

@@ -19,14 +19,8 @@ import type { RlmConfig, RunRlm, Sampling } from "../pi-plugin/rlm/src/core/type
 type BenchModel = EngineDeps["model"];
 type BenchRegistry = EngineDeps["registry"];
 
-/** r3 single bench model: Qwen3.8 27B, 1M-token context. Agent taxonomy (user, 2025-09-10):
- *  root (Pi dialog) thinks; the RLM root thinks (benchSampling pins an explicit level);
- *  llm sub-workers never think — pi-ai turns a missing level into each dialect's explicit
- *  no-thinking directive. Verified to drive the repl protocol AND use llm_query delegation. */
-export const DEFAULT_MODEL_REF = "openrouter/qwen/qwen3.8-27b";
-
-/** Advertised context window for the default model (qwen3.8-27b: 1M). Override via
- *  RLM_BENCH_CONTEXT_WINDOW when switching models. Only load-bearing if enableTokenBudget is
+/** Advertised context window of the model under test (default 1M). Override via
+ *  RLM_BENCH_CONTEXT_WINDOW. Only load-bearing if enableTokenBudget is
  *  ever re-enabled (it is off) — plus provider-side safety. */
 const BENCH_CONTEXT_WINDOW = Number(process.env.RLM_BENCH_CONTEXT_WINDOW ?? 1_000_000);
 
@@ -46,64 +40,35 @@ export interface BenchTarget {
   readonly baseUrl: string;
 }
 
-/** Z.ai (bigmodel.cn) free-tier models speak the OpenAI protocol at /api/paas/v4. */
-// Coding-plan endpoint is the only channel where glm-4.7 avoids 429 (plan §0 probe:
-// global/china plain channels are balance-gated for non-flash models, 2025-09-09).
-const ZAI_BASE_URL = "https://api.z.ai/api/coding/paas/v4";
-const BAI_BASE_URL = "https://api.b.ai/v1";
-const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
+const PROVIDERS: Readonly<Record<string, { readonly baseUrl: string; readonly envVar: string }>> = Object.freeze({
+  openrouter: { baseUrl: "https://openrouter.ai/api/v1", envVar: "OPENROUTER_API_KEY" },
+  // Z.ai coding-plan endpoint: the only channel where glm-4.7 avoids 429 (plan §0 probe:
+  // global/china plain channels are balance-gated for non-flash models, 2025-09-09).
+  zai: { baseUrl: "https://api.z.ai/api/coding/paas/v4", envVar: "ZAI_API_KEY" },
+  "b-ai": { baseUrl: "https://api.b.ai/v1", envVar: "BAI_API_KEY" },
+});
 
-/** Accepts "openrouter/<id>" / "zai/<id>" / "b-ai/<id>" (project ref convention) or a bare "<id>";
+/** Accepts "<provider>/<id>" for a PROVIDERS key (project ref convention) or a bare "<id>";
  *  openrouter implied for bare ids. */
 export function resolveTarget(raw: string): BenchTarget {
   const trimmed = raw.trim();
-  const id = trimmed.replace(/^openrouter\//, "");
-  if (id !== trimmed) {
-    return Object.freeze({
-      ref: `openrouter/${id}`,
-      provider: "openrouter",
-      id,
-      contextWindow: BENCH_CONTEXT_WINDOW,
-      baseUrl: OPENROUTER_BASE_URL,
-    });
-  }
-  const zaiId = trimmed.replace(/^zai\//, "");
-  if (zaiId !== trimmed) {
-    return Object.freeze({
-      ref: `zai/${zaiId}`,
-      provider: "zai",
-      id: zaiId,
-      contextWindow: BENCH_CONTEXT_WINDOW,
-      baseUrl: ZAI_BASE_URL,
-    });
-  }
-  const baiId = trimmed.replace(/^(?:b-ai|b\.ai|bai)\//i, "").toLowerCase();
-  if (/^(?:b-ai|b\.ai|bai)\//i.test(trimmed)) {
-    return Object.freeze({
-      ref: `b-ai/${baiId}`,
-      provider: "b-ai",
-      id: baiId,
-      contextWindow: BENCH_CONTEXT_WINDOW,
-      baseUrl: BAI_BASE_URL,
-    });
-  }
+  const slash = trimmed.indexOf("/");
+  const prefix = trimmed.slice(0, slash);
+  const known = slash > 0 && Object.hasOwn(PROVIDERS, prefix);
+  const provider = known ? prefix : "openrouter";
+  const id = known ? trimmed.slice(slash + 1) : trimmed;
   return Object.freeze({
-    ref: `openrouter/${id}`,
-    provider: "openrouter",
+    ref: `${provider}/${id}`,
+    provider,
     id,
     contextWindow: BENCH_CONTEXT_WINDOW,
-    baseUrl: OPENROUTER_BASE_URL,
+    baseUrl: PROVIDERS[provider]?.baseUrl ?? "",
   });
 }
 
 /** The ONLY key transport is the environment. Fail fast with an actionable message. */
 export function requireApiKey(provider = "openrouter"): string {
-  const envVar =
-    provider === "zai"
-      ? "ZAI_API_KEY"
-      : provider === "b-ai"
-        ? "BAI_API_KEY"
-        : "OPENROUTER_API_KEY";
+  const envVar = PROVIDERS[provider]?.envVar ?? "OPENROUTER_API_KEY";
   const key = process.env[envVar];
   if (!key || key.trim().length === 0) {
     throw new Error(

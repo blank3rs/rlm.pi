@@ -1,85 +1,69 @@
 # bench/ — RLM engine benchmarks
 
-E2E benchmarks for **this project's** RLM engine (`pi-plugin/rlm/src/core/engine.ts`,
-the real headless loop + real Python sandbox + real provider I/O). The task suites,
-fixtures, and graders are ported from the experimental lab `../rlm_test`
-(`src/rlm_agent/bench/{needle,suite}.py` + `benches/`); the lab's Python engine is **not**
-used or moved.
+These benchmarks run the real engine (`pi-plugin/rlm/src/core/engine.ts`) with the real
+Python sandbox and real provider calls.
+
+## Panel
+
+The models under test are in [`panel.json`](panel.json). It is the only source of the model
+list: `run.ts` and `hero.py` both read it.
+
+| Model | Key |
+|---|---|
+| `zai/glm-5.3` | `ZAI_API_KEY` (Z.ai coding-plan endpoint) |
+| `b-ai/qwen3.8-27b` | `BAI_API_KEY` (`https://api.b.ai/v1`) |
+| `openrouter/openai/gpt-oss-120b` | `OPENROUTER_API_KEY` |
+
+To change the panel, edit `panel.json`. Do not add model names to the code.
 
 ## Suite
 
-One suite, on purpose: `oolong` — the only one that can see a regression. Everything else was
-pruned (needle/s_niah saturated at 100% for every live model; codeqa/coding were toy tasks;
-browsecomp/codeqa_lb needed web-scale downloads for off-signal numbers).
+There is one suite: `oolong` (`oolongbench/oolong-synth`). Each task is an aggregation
+question over synthetic records. The grader gives a score from 0 to 1. `correct` is true
+only for a full score. The datasets download from HuggingFace on first use into
+`bench/data/` (gitignored).
 
-| Suite | Task | Source dataset | Scoring |
-|-------|------|----------------|---------|
-| `oolong` | Aggregation questions over synth records; rows round-robin across `context_len` buckets (extendable via `--oolong-max-cl` / `--oolong-limit`) | `oolongbench/oolong-synth` | label / numeric / list heuristic (0–1); `recall` = score, `correct` = full score |
+## Run
 
-Datasets download from HuggingFace on first use and cache in `bench/data/` (gitignored —
-delete a file to refetch).
-
-Adaptation vs the lab: this engine's sandbox exposes retrieval + delegation only (no
-`write`/`edit` tools — Pi owns mutations by design), so every suite grades the ANSWER.
-
-## Running
-
-The API key travels **via env vars only** — never hardcode it, never commit it.
+Keys go in env vars only. Do not write keys in files.
 
 ```bash
-export OPENROUTER_API_KEY=sk-or-...        # required (or ZAI_API_KEY / BAI_API_KEY)
-bun run bench/run.ts                       # oolong, default model, 8 tasks @ cl ≤ 2048
-bun run bench/run.ts --limit 1             # first task only
-bun run bench/run.ts --oolong-max-cl 65536 --oolong-limit 24
-                                           # extended oolong: context_len cap / task count
-bun run bench/run.ts --model zai/glm-4.7
-bun run bench/run.ts --model b-ai/qwen3.8-27b
-bun run bench/run.ts --list                # print tasks + context sizes, no engine
-bun run bench/run.ts --journal bench/runs/foo.jsonl --resume
-                                           # crash-safe pooled run: rows already in the
-                                           # journal (same model+task+run) are skipped
-bun run bench/run.ts --runs 3 --max-iterations 16 --reasoning high \
-  --model openrouter/qwen/qwen3.8-27b      # r3-recipe: pooled repeats + thinking arm
+export ZAI_API_KEY=... BAI_API_KEY=... OPENROUTER_API_KEY=...
+bun run bench --oolong-max-cl 65536 --oolong-limit 24   # canonical run, all panel models
+bun run bench --model zai/glm-5.3 --oolong-max-cl 65536 --oolong-limit 24   # one model
+bun run bench --limit 1                                  # smoke test: first task only
+bun run bench --list                                     # show tasks, no model calls
+bun run bench --model zai/glm-5.3 --journal <file> --resume   # continue a stopped run
+bun run bench --task-delay-ms 60000                      # pause between tasks (rate limits)
+bun run bench --runs 3                                   # pooled repeats
 ```
 
-Optional env vars:
+`--resume` skips tasks that are already in the journal. It removes rows that ended with an
+upstream `error`, and runs those tasks again.
 
-| Var | Default | Meaning |
-|-----|---------|---------|
-| `RLM_BENCH_MODEL` | `openrouter/qwen/qwen3.8-27b` | Model under test — one of the three-model panel (`qwen3.8-27b` / `mercury-2.5` / `glm-4.7`). A full oolong run costs ≈ $0.03–0.30 by model. Free pools die mid-stream (`finish_reason:"error"` with no payload) |
-| `ZAI_API_KEY` | — | Required for `zai/*` models (Z.ai coding endpoint, e.g. `zai/glm-4.7`); OpenRouter models use `OPENROUTER_API_KEY` only |
-| `BAI_API_KEY` | — | Required for `b-ai/*` models (`https://api.b.ai/v1`, e.g. `b-ai/qwen3.8-27b`) |
-| `RLM_BENCH_CONTEXT_WINDOW` | `1000000` | Advertised context window of the model under test (budget math uses it) |
+Optional env var: `RLM_BENCH_CONTEXT_WINDOW` (default `1000000`).
 
-### Recall eval (no API key needed)
+## Results
 
-`bun run bench/recall-eval.ts` replays the native context transform (elision + Σ splice +
-session archive) over scripted needle transcripts and scores three arms — legacy
-(keepTurns=2, no archive), the recall package (keepTurns=4, archive ON), and the
-`RLM_BENCH_NO_ROOTCONTEXT` ceiling. Deterministic, offline: it proves the elision window
-stays bounded while needle facts remain dereferenceable through `ctx/session-log/*`.
-Live-model end-to-end confirmation still goes through the oolong bench above.
+- `bench/runs/<model>/<timestamp>.jsonl` — one row per task: `suite, taskId, model, run,
+  correct, recall, answer, gold, error, latencyMs, inputTokens, outputTokens, iterations,
+  costUsd`.
+- `<journal>.config.json` — the run settings (model, git rev, limits, temperature, pricing).
+- `bun run bench/report.ts <journal>...` — summary table and per-task matrix.
+- `python3 bench/hero.py` — chart of the newest full journal (≥ 6 rows) per panel model.
+  Needs `matplotlib`.
 
+Commit full journals. Do not commit smoke tests or journals of models outside the panel.
 
-## Artifacts
+## Recall eval (no API key)
 
-- `bench/runs/bench-<ts>.jsonl` — one JSONL row per task: `suite, taskId, model, correct,
-  recall, answer, gold, error, latencyMs, inputTokens, outputTokens, iterations, costUsd`
-  (mirrors the lab's journal schema). Journal only — no aggregate report is written.
+`bun run bench/recall-eval.ts` replays the native context transform over scripted
+transcripts. It is offline and deterministic. It checks that the elision window stays
+bounded and that needle facts stay reachable through `ctx/session-log/*`.
 
-## Engine wiring (bench/engine.ts)
+## Engine settings (`engine.ts`)
 
-`makeRun()` builds `createEngine` deps exactly like the mock fixtures in
-`pi-plugin/rlm/test/helpers.ts`, but pointed at OpenRouter: a `Model<Api>` row with
-`provider: "openrouter"`, `api: "openai-completions"`, `baseUrl: https://openrouter.ai/api/v1`,
-and a registry whose `getApiKeyAndHeaders` returns the env key at call time. No `complete`
-override → the engine uses `modelComplete` (real `completeSimple` + retry/throttle).
-
-Bench config: `maxIterations 16`, `maxConcurrentSubcalls 4`, `enableMemory false`,
-`autoSeedCwd false`, `rootSampling.maxTokens 4096`, `subSampling.maxTokens 2048`,
-`enableTokenBudget false` (the cascade caps a task at ~25% of the context window — below the
-raw context of paper-tier tasks; it is unit-tested separately in `pi-plugin/rlm/test/budget.ts`).
-
-Not ported from the lab: `api_suite` / `mem_suite` / `e2e_v2–v4` (they test lab-only engine
-internals — orchestrator tool-recall traces, ledger/memory units, budget governor events —
-which this project covers with its own `pi-plugin/rlm/test/` suites).
+`makeRun()` builds the engine like the test fixtures in `pi-plugin/rlm/test/helpers.ts`,
+but with a real provider. Main settings: `maxIterations 200`, `autoSeedCwd false`,
+`enableTokenBudget false`, 5 retries and 30 rate-limit retries. On `zai`, concurrency is 1
+and retry delays are longer.

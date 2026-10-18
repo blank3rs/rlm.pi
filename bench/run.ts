@@ -1,16 +1,13 @@
 /**
  * bench/run.ts — e2e benchmark driver for THIS project's RLM engine.
  *
- * Drives pi-plugin/rlm's headless engine (`createEngine`) against real OpenRouter models with
- * THE hardcore suite: oolong (oolongbench/oolong-synth) — the only benchmark that can
+ * Drives pi-plugin/rlm's headless engine (`createEngine`) against real provider models with
+ * one suite: oolong (oolongbench/oolong-synth) — the only one that can see a regression.
  *
- * r3 runs a SINGLE model (bench/engine.ts DEFAULT_MODEL_REF = qwen3.8-27b, real OpenRouter
- * pricing fetched at runtime); temperature defaults to 0; repeats (`--runs N`) must be
- * reported pooled, never single-run — aggregate with bench/report.ts.
+ * Without --model it runs every model in bench/panel.json (the single panel source).
  *
  * Env vars (the only key transport — never hardcode keys, never commit them):
- *   OPENROUTER_API_KEY / ZAI_API_KEY / BAI_API_KEY  required (matches the --model provider)
- *   RLM_BENCH_MODEL           optional, default DEFAULT_MODEL_REF (openrouter/qwen/qwen3.8-27b)
+ *   OPENROUTER_API_KEY / ZAI_API_KEY / BAI_API_KEY  required (matches the model provider)
  *   RLM_BENCH_CONTEXT_WINDOW  optional, default 1000000
  *
  * Usage (from the repo root):
@@ -18,9 +15,8 @@
  *   bun run bench/run.ts --limit 1            # first task only
  *   bun run bench/run.ts --oolong-max-cl 65536 --oolong-limit 24
  *                                             # extended oolong: context_len cap / task count
- *   bun run bench/run.ts --model b-ai/qwen3.8-27b
- *   bun run bench/run.ts --model openrouter/google/gemma-4-31b-it:free
- *   bun run bench/run.ts --sub-model zai/glm-4.7   # llm tier (thinking off by dialect)
+ *   bun run bench/run.ts --model b-ai/qwen3.8-27b   # one panel model only
+ *   bun run bench/run.ts --sub-model zai/glm-5.3     # llm tier (thinking off by dialect)
  *   bun run bench/run.ts --list               # print tasks + context sizes, no engine
  *   bun run bench/run.ts --oolong-labels      # labeled arm: leaf-label context (P0),
  *                                             # separate cache family oolong_lab_synth_*
@@ -29,19 +25,18 @@
  *   bun run bench/run.ts --journal bench/runs/foo.jsonl --resume
  *                                             # crash-safe pooled run: rows already in the
  *                                             # journal (same model+task+run) are skipped
- *   bun run bench/run.ts --runs 3 --max-iterations 16 \
- *     --model openrouter/qwen/qwen3.8-27b   # NO --reasoning flag: RLM root never thinks
- *                                             # r3-style: repeats + thinking arm
+ *   bun run bench/run.ts --runs 3 --max-iterations 16   # pooled repeats
  *
- * Artifacts: JSONL journal bench/runs/bench-<ts>.jsonl — aggregate via bench/report.ts.
+ * Artifacts: JSONL journal bench/runs/<model>/<timestamp>.jsonl — aggregate via bench/report.ts.
  * A sidecar `<journal>.config.json` (P4.2) records model/temp/runs/labels/skillstate/git rev
  * so a journal stays readable without the shell that produced it.
  */
 
 import { appendRow, makeRow, type BenchRow } from "./journal.ts";
 import { gradeAnswer } from "./grade.ts";
-import { DEFAULT_MODEL_REF, fetchPricing, makeRun, requireApiKey, resolveTarget, type BenchPricing, type BenchRunOpts } from "./engine.ts";
+import { fetchPricing, makeRun, requireApiKey, resolveTarget, type BenchPricing } from "./engine.ts";
 import { buildTasks, type BenchTask, type SuiteName } from "./tasks.ts";
+import panel from "./panel.json";
 import { SkillStore } from "../pi-plugin/rlm/src/config/skillstate.ts";
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
@@ -74,7 +69,7 @@ interface Args {
 }
 
 function parseArgs(argv: readonly string[]): Args {
-  let suite: SuiteName = "oolong";
+  const suite: SuiteName = "oolong";
   let limit: number | undefined;
   let model: string | undefined;
   let subModel: string | undefined;
@@ -156,11 +151,14 @@ function printTasks(tasks: readonly BenchTask[]): void {
   }
 }
 
-/** Journal row → dedup key for --resume; tolerant of foreign/malformed lines (returns undefined).
- *  Rows that terminated with an upstream `error` are NOT treated as completed so `--resume` re-runs them. */
+/** An upstream-`error` row: not a completed task — `--resume` drops and re-runs it. */
+function isErrorRow(v: unknown): boolean {
+  return typeof v === "object" && v !== null && "error" in v && typeof v.error === "string" && v.error.length > 0;
+}
+
+/** Journal row → dedup key for --resume; tolerant of foreign/malformed lines (returns undefined). */
 function resumeKeyOf(v: unknown): string | undefined {
   if (typeof v !== "object" || v === null) return undefined;
-  if ("error" in v && typeof v.error === "string" && v.error.length > 0) return undefined;
   const taskId = "taskId" in v ? v.taskId : undefined;
   const run = "run" in v ? v.run : undefined;
   const model = "model" in v ? v.model : undefined;
@@ -170,20 +168,24 @@ function resumeKeyOf(v: unknown): string | undefined {
   return `${model}#${taskId}#${run}`;
 }
 
-/** Set of `model#taskId#run` keys already present in the journal file (fail-soft: empty on any error). */
+/** Set of `model#taskId#run` keys already present in the journal file (fail-soft: empty on any error).
+ *  Error rows are removed from the journal so their re-run never leaves a duplicate row. */
 function loadResumeSet(journalPath: string): Set<string> {
   const done = new Set<string>();
   try {
-    const prior = readFileSync(journalPath, "utf8");
-    for (const line of prior.split("\n")) {
-      if (!line.trim()) continue;
+    const lines = readFileSync(journalPath, "utf8").split("\n").filter((l) => l.trim());
+    const kept = lines.filter((line) => {
       try {
-        const key = resumeKeyOf(JSON.parse(line));
+        const row: unknown = JSON.parse(line);
+        if (isErrorRow(row)) return false;
+        const key = resumeKeyOf(row);
         if (key !== undefined) done.add(key);
       } catch {
-        // malformed line — skip, never crash the run
+        // malformed line — keep it, never crash the run
       }
-    }
+      return true;
+    });
+    if (kept.length < lines.length) writeFileSync(journalPath, kept.map((l) => l + "\n").join(""));
   } catch {
     // no prior journal — resume from scratch
   }
@@ -271,7 +273,14 @@ async function main(): Promise<void> {
     return;
   }
 
-  const target = resolveTarget(args.model ?? process.env.RLM_BENCH_MODEL ?? DEFAULT_MODEL_REF);
+  // No --model → the whole panel, one journal per model.
+  const refs = args.model !== undefined ? [args.model] : panel.models;
+  if (args.journal !== undefined && refs.length > 1) throw new Error("--journal needs --model (one journal per model)");
+  for (const ref of refs) await benchModel(ref, args, tasks, wantLabels);
+}
+
+async function benchModel(ref: string, args: Args, tasks: readonly BenchTask[], wantLabels: boolean): Promise<void> {
+  const target = resolveTarget(ref);
   const apiKey = requireApiKey(target.provider);
   // Pricing catalog is OpenRouter-only; free-tier providers (zai) bench at zero cost.
   const pricing =
@@ -290,7 +299,8 @@ async function main(): Promise<void> {
     pricing,
     ...(skillStore === undefined ? {} : { skillStore }),
   });
-  const journalPath = args.journal ?? `bench/runs/bench-${Date.now()}.jsonl`;
+  const stamp = new Date().toISOString().slice(0, 19).replaceAll(":", "");
+  const journalPath = args.journal ?? `bench/runs/${target.id.split("/").pop() ?? target.id}/${stamp}.jsonl`;
 
   // --resume: skip (model, task, run) triples already journaled — pooled runs stay crash-safe;
   // re-run the same command and only missing rows get produced (same journal file is reused).
@@ -344,7 +354,7 @@ async function main(): Promise<void> {
       (wroteConfig ? `  config=${configPath}` : ""),
   );
 
-  const effectiveTaskDelayMs = args.taskDelayMs ?? (Number(process.env.RLM_BENCH_TASK_DELAY_MS ?? 0) || 0);
+  const taskDelayMs = args.taskDelayMs ?? 0;
   const rows: BenchRow[] = [];
   for (let runIndex = 1; runIndex <= (args.runs ?? 1); runIndex++) {
     for (const task of tasks) {
@@ -352,9 +362,9 @@ async function main(): Promise<void> {
         console.log(`  = ${task.suite}/${task.id} run=${runIndex} skipped (already in journal)`);
         continue;
       }
-      if (rows.length > 0 && effectiveTaskDelayMs > 0) {
-        console.log(`  ⏳ waiting ${Math.round(effectiveTaskDelayMs / 1000)}s before ${task.suite}/${task.id}...`);
-        await new Promise((resolve) => setTimeout(resolve, effectiveTaskDelayMs));
+      if (rows.length > 0 && taskDelayMs > 0) {
+        console.log(`  ⏳ waiting ${Math.round(taskDelayMs / 1000)}s before ${task.suite}/${task.id}...`);
+        await new Promise((resolve) => setTimeout(resolve, taskDelayMs));
       }
       let row: BenchRow;
       try {
