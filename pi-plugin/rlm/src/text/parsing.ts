@@ -48,7 +48,7 @@ export type StateFenceResult =
   | { readonly ok: false; readonly error: string };
 
 const STATE_FENCE = /(`{3,})[ \t]*(?:state\b[^\r\n]*\r?\n|\r?\n[ \t]*state\b[^\r\n]*\r?\n)([\s\S]*?)\1/g;
-
+const UNCLOSED_STATE_FENCE = /`{3,}[ \t]*(?:state\b[^\r\n]*\r?\n|\r?\n[ \t]*state\b[^\r\n]*\r?\n)([\s\S]*)$/;
 /** Tolerant fallback: a payload object whose FIRST key is the patch key, emitted without a
  *  (well-formed) fence — soak keeps catching `...report.state {"state_patch": …}}` blobs from
  *  small models that mangle the opening backticks. Matched literally so ordinary prose or
@@ -131,7 +131,7 @@ export function foldStateFences(text: string, fold: string): string {
   };
   // Well-formed fences first (document order), then bare blobs over the remainder — same
   // order as findStatePatches, so a payload is never counted (or folded) twice.
-  const rest = text.replace(STATE_FENCE, place);
+  const rest = text.replace(STATE_FENCE, place).replace(UNCLOSED_STATE_FENCE, place);
   const jsonSpans = jsonFenceSpans(rest);
   const parts: string[] = [];
   let cursor = 0;
@@ -165,12 +165,33 @@ export function hasStatePatch(text: string): boolean {
  *  by a lone ``` line) — cosmetic residue we scrub alongside the object itself. */
 const ORPHAN_FENCE = /^ {0,3}`{3,}[ \t]*\r?$/gm;
 
-/** Bookkeeping transport, never content: remove well-formed ```state fences AND the bare
- *  {"state_patch"…} objects models leak when they botch the fence syntax (both directions —
- *  parse for Σ harvest, strip for user-visible answers). Order: well-formed fences out first,
- *  then the bare-object scan over the remainder can never double-count the same payload. */
-function sansFences(text: string): string {
-  return text.replace(STATE_FENCE, "");
+function parseStateFenceBody(body: string, out: StateFenceResult[]): void {
+  const trimmed = body.trim();
+  if (trimmed === "") return;
+  try {
+    out.push({ ok: true, value: JSON.parse(trimmed) as unknown });
+  } catch (err: unknown) {
+    // Tolerant multi-object recovery (SpecRune bug): models sometimes concatenate
+    // several {"state_patch":…} objects inside ONE fence, which fails whole-body
+    // JSON.parse. Salvage each balanced object; only when nothing parses do we
+    // surface the error (the observation channel for the retry ladder).
+    let i = 0;
+    let salvaged = 0;
+    for (;;) {
+      while (i < trimmed.length && trimmed.charAt(i).trim() === "") i++;
+      if (i >= trimmed.length || trimmed.charAt(i) !== "{") break;
+      const obj = balancedJsonObject(trimmed, i);
+      if (obj === undefined) break;
+      try {
+        out.push({ ok: true, value: JSON.parse(obj) as unknown });
+        salvaged += 1;
+      } catch {
+        // Unparseable fragment — skip it, keep scanning.
+      }
+      i += obj.length;
+    }
+    if (salvaged === 0) out.push({ ok: false, error: errorMessage(err) });
+  }
 }
 
 /**
@@ -185,37 +206,19 @@ export function findStatePatches(text: string): readonly StateFenceResult[] {
   let m: RegExpExecArray | null;
   STATE_FENCE.lastIndex = 0;
   while ((m = STATE_FENCE.exec(text)) !== null) {
-    const body = (m[2] ?? "").trim();
-    if (body === "") continue;
-    try {
-      out.push({ ok: true, value: JSON.parse(body) as unknown });
-    } catch (err: unknown) {
-      // Tolerant multi-object recovery (SpecRune bug): models sometimes concatenate
-      // several {"state_patch":…} objects inside ONE fence, which fails whole-body
-      // JSON.parse. Salvage each balanced object; only when nothing parses do we
-      // surface the error (the observation channel for the retry ladder).
-      let i = 0;
-      let salvaged = 0;
-      for (;;) {
-        while (i < body.length && body.charAt(i).trim() === "") i++;
-        if (i >= body.length || body.charAt(i) !== "{") break;
-        const obj = balancedJsonObject(body, i);
-        if (obj === undefined) break;
-        try {
-          out.push({ ok: true, value: JSON.parse(obj) as unknown });
-          salvaged += 1;
-        } catch {
-          // Unparseable fragment — skip it, keep scanning.
-        }
-        i += obj.length;
-      }
-      if (salvaged === 0) out.push({ ok: false, error: errorMessage(err) });
-    }
+    parseStateFenceBody(m[2] ?? "", out);
+  }
+  const afterClosed = text.replace(STATE_FENCE, "");
+  const unclosed = UNCLOSED_STATE_FENCE.exec(afterClosed);
+  if (unclosed !== null) {
+    const body = (unclosed[1] ?? "").trim();
+    if (body === "") out.push({ ok: false, error: "unclosed ```state fence" });
+    else parseStateFenceBody(body, out);
   }
   // Tolerant harvest over fence-free remainder (well-formed payloads already taken above).
   // Candidates inside ```json fences are quotes/examples (recall W2) — skipped, so the
   // contract example a model echoes cannot burn session-wide patch retries.
-  const rest = sansFences(text);
+  const rest = unclosed !== null ? afterClosed.replace(UNCLOSED_STATE_FENCE, "") : afterClosed;
   const jsonSpans = jsonFenceSpans(rest);
   BARE_PATCH.lastIndex = 0;
   while ((m = BARE_PATCH.exec(rest)) !== null) {
@@ -237,7 +240,8 @@ export function findStatePatches(text: string): readonly StateFenceResult[] {
  *  bookkeeping). Deterministic scrub on the answer path; parse semantics stay in findStatePatches.
  *  Also removes bare {"state_patch"…} objects (mangled-fence leaks), a `state` token glued to
  *  preceding prose, and orphan ``` lines left behind by the mangled pair. */
-export function stripStateFences(text: string): string {  let out = sansFences(text);
+export function stripStateFences(text: string): string {
+  const out = text.replace(STATE_FENCE, "").replace(UNCLOSED_STATE_FENCE, "");
   const parts: string[] = [];
   let cursor = 0;
   // A {"state_patch"…} inside a ```json fence is a quotation (recall W2) — must survive in

@@ -81,7 +81,7 @@ export type RunStateMode =
       readonly retries: number;
       readonly idle: number;
     }
-  | { readonly kind: "degraded"; readonly reason: string };
+  | { readonly kind: "degraded"; readonly reason: string; readonly state?: RunState };
 
 /** Mutable working shape — the runtime draft patches apply to before capping/freezing.
  *  Exported so the root tracker (core/root-state.ts) builds on the exact same shape. */
@@ -818,12 +818,10 @@ export function applyStatePatches(
   // nothing — keep the same mode object (callers may compare identity).
   if (parsed.length === 0 && !fenceRequested && !productive) return { mode, observation: undefined };
   let state = mode.state;
-  let retries = mode.retries;
-  let accepted = 0;
   const problems: string[] = [];
+  let accepted = 0;
   for (const fence of parsed) {
     if (!fence.ok) {
-      retries += 1;
       problems.push(malformedFenceProblem(fence.error));
       continue;
     }
@@ -832,10 +830,17 @@ export function applyStatePatches(
       state = result.value;
       accepted += 1;
     } else {
-      retries += 1;
       problems.push(patchErrorText(result.error));
     }
   }
+  // Recall W2 parity: a clean accepted batch resets the retry counter; a partially-failing
+  // batch with accepted > 0 counts only its own problems (storm cap, not lifetime cap).
+  const retries =
+    problems.length === 0
+      ? 0
+      : accepted > 0
+        ? problems.length
+        : mode.retries + problems.length;
   // Bench rec #2: accepted deltas reset the idle streak; a requested-but-empty turn grows it.
   // Productive-turn parity (root tracker): executed work resets the streak too.
   const idle = accepted > 0 || !fenceRequested || productive ? 0 : mode.idle + 1;
@@ -844,11 +849,13 @@ export function applyStatePatches(
     nextMode = {
       kind: "degraded",
       reason: `runStateRetryMax exceeded (${retries} rejected state patches)`,
+      state,
     };
   } else if (idle >= RUN_STATE_IDLE_DEGRADE_TURNS) {
     nextMode = {
       kind: "degraded",
       reason: `idle degrade — ${idle} consecutive fence-requested turns with zero accepted deltas`,
+      state,
     };
   }
   return { mode: nextMode, observation: statePatchObservation(problems) };

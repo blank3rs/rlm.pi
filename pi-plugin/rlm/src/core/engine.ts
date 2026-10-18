@@ -241,26 +241,27 @@ export function createEngine(deps: EngineDeps): RunRlm {
     // Deterministic harvest is free (Σ is already structured); the opt-in A-Mem phrasing is
     // ONE cheap leaf call. Fail-soft: a distill failure must never damage a finished run.
     const harvestSkillNotes = async (): Promise<void> => {
-      if (runStateMode.kind !== "active") return;
+      const finalState = runStateMode.state;
+      if (finalState === undefined) return;
       // Root Σ WS-4 mirror FIRST — the tracker absorbs the final Σ even when the store is
       // off (one source, two sinks; never a second harvest implementation).
-      deps.onRunState?.(runStateMode.state);
+      deps.onRunState?.(finalState);
       if (skillStore === undefined || !deps.config.enableSkillState) return;
       // Depth-tagged deterministic harvest runs at every depth; the LLM distill is ROOT-ONLY —
       // every child distilling into the same project section crowded the note cap with
       // sub-task fragments (A-Mem store hygiene). Fail-soft: a distill failure must never
       // damage a finished run.
-      skillStore.merge(notesFromRunState(runStateMode.state, input.depth));
+      skillStore.merge(notesFromRunState(finalState, input.depth));
       if (!deps.config.enableSkillStateDistill || deps.signal?.aborted === true) return;
       if (input.depth > 0) return;
       try {
         const raw = await complete1(
           invocation,
-          distillPromptFor(runStateMode.state),
+          distillPromptFor(finalState),
           () => {},
           completeDeps(subcallDeps),
         );
-        const parsed = parseDistilledNotes(raw, runStateMode.state.task);
+        const parsed = parseDistilledNotes(raw, finalState.task);
         if (parsed.length > 0) skillStore.merge(parsed);
       } catch {
         // fail-soft by design
@@ -605,13 +606,14 @@ export function createEngine(deps: EngineDeps): RunRlm {
               // with Σ active the handoff IS the state (compactJSON — lossless where it
               // matters); the prose walk stays only for degraded runs.
               const originTask = input.originTask ?? input.rootPrompt;
-              const handoff = runStateMode.kind === "active"
-                ? stateHandoff(runStateMode.state, originTask, deps.config.budgetHandoffChars)
+              const committedState = runStateMode.state;
+              const handoff = committedState !== undefined
+                ? stateHandoff(committedState, originTask, deps.config.budgetHandoffChars)
                 : distillTrajectory(history, originTask, deps.config.budgetHandoffChars);
               const cont = budget.nextContinuation();
               // Workstream F (MAS2 Eq. 5): one deterministic local fix for the continuation.
               const fix = rectify({
-                state: runStateMode.kind === "active" ? runStateMode.state : undefined,
+                state: committedState,
                 config: deps.config,
               });
               if (selfReportId) {

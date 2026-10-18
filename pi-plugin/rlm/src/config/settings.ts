@@ -1,6 +1,6 @@
 /** Persist RLM settings (tunable config + pinned sub-LLM model id). */
 
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { getAgentDir, type ModelRegistry } from "@earendil-works/pi-coding-agent";
 import type { Api, Model, ThinkingLevel } from "@earendil-works/pi-ai";
@@ -22,6 +22,20 @@ type MutablePartialRlmConfig = { -readonly [K in keyof RlmConfig]?: RlmConfig[K]
 
 function settingsPath(): string {
   return join(getAgentDir(), "rlm.json");
+}
+
+/** Crash-safe atomic write (temp sibling + rename — @skillstate/core atomicWriteFile parity).
+ *  Shared by settings.ts and skillstate.ts so a SIGINT/kill mid-flush never leaves a truncated JSON file. */
+export async function atomicWriteJson(filePath: string, content: string): Promise<void> {
+  await mkdir(dirname(filePath), { recursive: true });
+  const tmp = `${filePath}.tmp.${process.pid}.${Math.random().toString(36).slice(2)}`;
+  try {
+    await writeFile(tmp, content);
+    await rename(tmp, filePath);
+  } catch (err) {
+    await rm(tmp, { force: true }).catch(() => {});
+    throw err;
+  }
 }
 
 function validateNumber(v: unknown, min: number): number | undefined {
@@ -236,7 +250,6 @@ export async function loadSettings(): Promise<PersistedSettings> {
 export async function saveSettings(s: PersistedSettings): Promise<boolean> {
   try {
     const p = settingsPath();
-    await mkdir(dirname(p), { recursive: true });
     const body: Record<string, unknown> = { config: s.config };
     const mergeDisk = s.llm === undefined || s.rlm === undefined;
     const existing = mergeDisk ? await loadSettings() : undefined;
@@ -252,7 +265,7 @@ export async function saveSettings(s: PersistedSettings): Promise<boolean> {
     } else if (existing?.rlm) {
       body.rlm = existing.rlm;
     }
-    await writeFile(p, `${JSON.stringify(body, null, 2)}\n`);
+    await atomicWriteJson(p, `${JSON.stringify(body, null, 2)}\n`);
     return true;
   } catch {
     return false;

@@ -15,9 +15,10 @@
  * projects' sections ride along untouched.
  */
 
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { readFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { atomicWriteJson } from "./settings.ts";
 import { bm25Rank } from "../util/bm25.ts";
 import { deepMergeWithNullDeletion } from "../util/state-merge.ts";
 import { formatError } from "../util/errors.ts";
@@ -218,9 +219,7 @@ export async function loadSkillStateTracked(dir?: string): Promise<SkillStateLoa
 /** Fail-soft boolean writer — mirrors settings.ts:saveSettings. */
 export async function saveSkillState(s: SkillStateFile, dir?: string): Promise<boolean> {
   try {
-    const p = skillStatePath(dir);
-    await mkdir(dirname(p), { recursive: true });
-    await writeFile(p, JSON.stringify(s));
+    await atomicWriteJson(skillStatePath(dir), JSON.stringify(s));
     return true;
   } catch {
     return false;

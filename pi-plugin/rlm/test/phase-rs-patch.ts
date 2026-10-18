@@ -15,7 +15,7 @@ import {
   STATE_FENCE_INSTRUCTION,
   type RunStateMode,
 } from "../src/core/run-state.ts";
-import { findStatePatches } from "../src/text/parsing.ts";
+import { findStatePatches, stripStateFences } from "../src/text/parsing.ts";
 import { DEFAULT_CONFIG } from "../src/config/defaults.ts";
 import { check, finish } from "./helpers.ts";
 
@@ -144,7 +144,7 @@ function base() {
   check("field write on missing entry rejected", !applyPatch(base(), { state_patch: { "testedApproaches.h9.status": "failed" } }, 1).ok);
   // The fence contract's own example must apply as written.
   const example = /\{"state_patch".*\}\}/.exec(STATE_FENCE_INSTRUCTION)?.[0] ?? "";
-  let parsed: unknown = null;
+  let parsed: unknown;
   try {
     parsed = JSON.parse(example);
   } catch {
@@ -229,14 +229,30 @@ function base() {
   check("good fence applied before bad rolled back", out.mode.kind === "active" && out.mode.state.verifiedFacts.includes("committed fact"));
   check("rejection observed", out.observation !== undefined && out.observation.includes("state patch rejected"));
   check("retry counted", out.mode.kind === "active" && out.mode.retries === 1);
-  // retries exhausted ⇒ degrade
+  // clean accepted batch resets retries to 0 (@skillstate/core & RootStateTracker parity)
+  if (out.mode.kind === "active") {
+    const reset = applyStatePatches(
+      out.mode,
+      findStatePatches('```state\n{"state_patch": {"findings[+]": "clean delta"}}\n```'),
+      4,
+      DEFAULT_CONFIG,
+    );
+    check("clean accepted batch resets retry counter", reset.mode.kind === "active" && reset.mode.retries === 0);
+  }
+  // retries exhausted ⇒ degrade, preserving last committed state
+  const seededState = applyPatch(base(), { state_patch: { "verifiedFacts[+]": "survived degrade" } }, 1);
   const degraded = applyStatePatches(
-    { kind: "active", state: base(), retries: DEFAULT_CONFIG.runStateRetryMax, idle: 0 },
+    { kind: "active", state: seededState.ok ? seededState.value : base(), retries: DEFAULT_CONFIG.runStateRetryMax, idle: 0 },
     findStatePatches("```state\n{\"state_patch\": {\"bogus\": 1}}\n```"),
     4,
     DEFAULT_CONFIG,
   );
-  check("retry exhaustion degrades", degraded.mode.kind === "degraded");
+  check("retry exhaustion degrades and preserves state", degraded.mode.kind === "degraded" && degraded.mode.state?.verifiedFacts.includes("survived degrade") === true);
+  // unclosed ```state fence (maxTokens truncation — @skillstate/core parity): detected and scrubbed
+  const truncated = 'Final answer text\n```state\n{"state_patch": {"verifiedFacts[+]": "truncated';
+  const truncPatches = findStatePatches(truncated);
+  check("unclosed state fence surfaces parse failure", truncPatches.length === 1 && !truncPatches[0].ok);
+  check("stripStateFences scrubs unclosed state fence", stripStateFences(truncated) === "Final answer text");
   // clean turn: no fences, no observation, mode untouched
   const clean = applyStatePatches(mode, findStatePatches("```repl\nprint(2)\n```"), 5, DEFAULT_CONFIG);
   check("fence-free turn is a no-op", clean.mode === mode && clean.observation === undefined);
