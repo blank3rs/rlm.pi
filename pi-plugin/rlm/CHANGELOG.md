@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.29] — 2026-10-21
 
 ### Changed
 
@@ -16,6 +16,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   provider (`providerMaxConcurrent`) and per run (`/rlm-config` → `unlimited` or a finite
   value; hand-edited `rlm.json`). `rectify()` no longer offers its `reduce-concurrency` arm
   when admission is unlimited — halving `Infinity` was a no-op.
+- RLM system prompts and REPL glossaries compacted by ~56% while preserving the orchestration,
+  fan-out and state-fence contracts; the leaf audit rubric now treats `llm_query`/`llm_batch`
+  as non-thinking extractors with strict criteria (`prompts/glossary.ts`, `prompts/native.ts`,
+  `prompts/system.ts`).
+
+### Fixed
+
+- **Provider KV prefix cache stabilization** (`context/listing.ts`, `core/root-context.ts`,
+  `index.ts`): context listing and Σ snapshot injections stay byte-stable across turns, archive
+  segments are excluded, and history elision advances in quantized turn epochs.
+- **TaskLedger near-duplicate rejection hardened** (`core/ledger.ts`, `core/engine.ts`,
+  `core/run-state.ts`): distinct sibling tasks are no longer rejected as echoes — ancestor
+  comparisons are depth-scoped with run-id teardown and target-identifier comparison; the
+  Σ validator accepts `artifacts[+]`, outcome status aliases and dotted multi-key patches.
+- **`rlmBudget` demotion** (`bridge/handlers/rlm-query.ts`, `tool/repl-tool.ts`): a demoted
+  `rlm_query(task, paths)` leaf receives matched `context` files (32K-char cap) instead of
+  answering `NOT_FOUND`, and the budget resets per user turn.
+- **Run-scoped aborts** (`core/engine.ts`, `bridge/handlers/rlm-query.ts`): each run owns an
+  `AbortController` chained off the parent signal and child runs inherit it, so sub-calls
+  terminate with their run; the abort fires only after detached work settles.
+- **Staggered cooldown release** (`util/throttle.ts`, `util/retry.ts`): waiters parked on the
+  same provider are released with a staggered `min(baseMs, 1s)` delay instead of a
+  synchronized burst; `penalize()` takes per-policy base/max and clamps to `maxMs`.
+- **Verification nudge and answer capture** (`core/engine.ts`, `sandbox/py/worker.py`): the
+  nudge also fires on a first turn that ran no blocks; final-answer capture is deferred past
+  the nudge decision; `answer["ready"]` resets after capture so a ready flag with empty
+  content cannot persist.
+- **Skill-state persistence hardening** (`config/settings.ts`, `config/skillstate.ts`,
+  `text/parsing.ts`, `core/run-state.ts`, `core/engine.ts`): atomic temp-file+rename writes
+  for persisted settings and skill state; unclosed ```state fences are recovered and scrubbed
+  from user-visible answers; the last good RunState is preserved when a run degrades and the
+  patch retry counter resets on clean accepted batches.
 
 ## [0.3.28] — 2026-10-07
 
