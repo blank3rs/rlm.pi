@@ -75,6 +75,14 @@ import { errorMessage } from "../src/util/errors.ts";
   const dHot = led.tryClaim(hot, taskKey("llm", hot.prompt, [], "m", ""));
   check("claim: same frame, different question runs (never inherits 'Down')", dHot.type === "run", JSON.stringify(dHot));
 
+  // rlm_batch fan-out: one long shared brief, different areas → separate child runs
+  const brief = "Search the web, read primary sources, cite every claim with a URL and date, write sections 1-6. ".repeat(3);
+  const rlA = { kind: "rlm" as const, prompt: `${brief}Your area: reinforcement learning recipes.`, paths: [], depth: 1 };
+  const rlB = { ...rlA, prompt: `${brief}Your area: hosting and serving costs.` };
+  led.tryClaim(rlA, taskKey("rlm", rlA.prompt, [], "m", ""));
+  const dB = led.tryClaim(rlB, taskKey("rlm", rlB.prompt, [], "m", ""));
+  check("claim: shared-brief sibling with a different area runs", dB.type === "run", JSON.stringify(dB));
+
   // disjoint goal → fresh run
   const other = { ...req, prompt: "profile the database query latency" };
   const d4 = led.tryClaim(other, taskKey("rlm", other.prompt, other.paths, "m", ""));
